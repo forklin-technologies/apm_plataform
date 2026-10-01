@@ -1,9 +1,14 @@
-.venv
-.env
-.env.*
-__pycache__
-*.pyc
-.pytest_cache
-.mypy_cache
-.ruff_cache
-.git
+# Keep secrets and local artifacts out of the build context, at any depth.
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/.git
