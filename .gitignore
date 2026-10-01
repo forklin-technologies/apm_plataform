@@ -1,6 +1,8 @@
 node_modules
 .next
 .env
+.env.*
+!.env.example
 *.p12
 *.pfx
 *.pem
@@ -9,3 +11,12 @@ node_modules
 .DS_Store
 *.tsbuildinfo
 .maestri/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
