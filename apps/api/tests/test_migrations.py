@@ -68,7 +68,7 @@ def test_upgrade_from_an_empty_database_creates_everything(scratch_db: ScratchDb
     assert result.returncode == 0, result.stderr
     assert _catalog(scratch_db) == {"tables": EXPECTED_TABLES, "policies": 11, "functions": 2}
     current = run_alembic(scratch_db, "current")
-    assert "0004_tenancy_rls (head)" in current.stdout + current.stderr
+    assert "0005_tenancy_write_grants (head)" in current.stdout + current.stderr
     admin = _admin_engine(scratch_db)
     try:
         assert _role(admin, "apm_app") == (False, False, True, False, False)
@@ -138,6 +138,33 @@ def test_upgrade_repairs_a_tampered_application_role(scratch_db: ScratchDb) -> N
         finally:
             with admin.begin() as connection:  # never leave the shared role loosened
                 connection.execute(text("ALTER ROLE apm_app NOBYPASSRLS"))
+    finally:
+        admin.dispose()
+
+
+def test_0005_closes_the_membership_hole_on_a_database_already_at_0004(
+    scratch_db: ScratchDb,
+) -> None:
+    """A database that ran 0004 (INSERT on memberships, table-level UPDATE) is fixed by 0005."""
+    assert run_alembic(scratch_db, "upgrade", "head").returncode == 0
+    admin = _admin_engine(scratch_db)
+    query = text(
+        "SELECT has_table_privilege('apm_app', 'memberships', 'INSERT'), "
+        "has_column_privilege('apm_app', 'memberships', 'user_id', 'UPDATE'), "
+        "has_column_privilege('apm_app', 'schools', 'organization_id', 'UPDATE'), "
+        "has_column_privilege('apm_app', 'organizations', 'id', 'UPDATE')"
+    )
+    try:
+        with admin.connect() as connection:
+            assert tuple(connection.execute(query).one()) == (False, False, False, False)
+
+        assert run_alembic(scratch_db, "downgrade", "0004_tenancy_rls").returncode == 0
+        with admin.connect() as connection:  # what 0004 left behind
+            assert tuple(connection.execute(query).one()) == (True, True, True, True)
+
+        assert run_alembic(scratch_db, "upgrade", "head").returncode == 0
+        with admin.connect() as connection:
+            assert tuple(connection.execute(query).one()) == (False, False, False, False)
     finally:
         admin.dispose()
 

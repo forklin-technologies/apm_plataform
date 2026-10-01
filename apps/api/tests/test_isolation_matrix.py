@@ -49,7 +49,9 @@ EXPECTED_APP: dict[tuple[str, str], set[str]] = {
     ("schools", "update"): SCHOOL_SCOPED,
     ("schools", "delete"): NOBODY,
     ("memberships", "select"): SCHOOL_SCOPED,
-    ("memberships", "insert"): SCHOOL_SCOPED,
+    # apm_app cannot create memberships (M1): the foreign key to users is checked without row level
+    # security and would accept a user of another tenant. The invitation flow of TASK-004 will.
+    ("memberships", "insert"): NOBODY,
     ("memberships", "update"): SCHOOL_SCOPED,
     ("memberships", "delete"): SCHOOL_SCOPED,
     # Visible through a visible membership; no write privilege until authentication exists.
@@ -64,6 +66,7 @@ EXPECTED_APP: dict[tuple[str, str], set[str]] = {
 EXPECTED_OWNER: dict[tuple[str, str], set[str]] = {
     **EXPECTED_APP,
     ("organizations", "insert"): ALL_OWN,  # with the NEW organization as the context
+    ("memberships", "insert"): SCHOOL_SCOPED,  # the owner (migrations, seed) may; FORCE applies
 }
 
 
@@ -231,56 +234,86 @@ def test_owner_is_also_bound_by_the_policies_force_rls(
 
 # --- tenant-hop: a write that tries to move a row into somebody else's tenant -------------------
 
-# (description, sql, context name) run as both roles. Each must be refused (an error: WITH CHECK or
-# the composite foreign key), and the row must be unchanged afterwards.
-HOPS: list[tuple[str, str, str]] = [
+# What stops each attempt, per role (the text must be in the database error):
+#   "permission denied"  the column or the command is not granted to apm_app (M1: user_id,
+#                        organization_id, school_id and id are not updatable; memberships cannot be
+#                        inserted)
+#   "row-level security" the WITH CHECK of the policy (the owner has every privilege, so only the
+#                        policies stop it)
+#   "foreign key"        the composite foreign key (school_id, organization_id)
+PRIVILEGE = "permission denied"
+RLS = "row-level security"
+FK = "foreign key"
+
+# (description, sql, context name, why apm_app is refused, why the owner is refused)
+HOPS: list[tuple[str, str, str, str, str]] = [
     (
         "school moves to another organization",
         "UPDATE schools SET organization_id = :org_b WHERE id = :school_a1",
         "own_org",
+        PRIVILEGE,
+        RLS,
     ),
     (
         "membership moves to another organization",
         "UPDATE memberships SET organization_id = :org_b WHERE id = :membership_a1",
         "own_org",
+        PRIVILEGE,
+        RLS,
     ),
     (
         "membership points at a school of another organization (composite FK)",
         "UPDATE memberships SET school_id = :school_b1 WHERE id = :membership_a1",
         "own_org",
+        PRIVILEGE,
+        FK,
     ),
     (
         "membership moves to another school of the same organization from a school context",
         "UPDATE memberships SET school_id = :school_a2 WHERE id = :membership_a1",
         "own_school",
+        PRIVILEGE,
+        RLS,
     ),
     (
         "organization takes the identity of another organization",
         "UPDATE organizations SET id = :org_b WHERE id = :org_a",
         "own_org",
+        PRIVILEGE,
+        RLS,
     ),
     (
         "new membership written into another organization",
         "INSERT INTO memberships (user_id, organization_id, school_id, role, status) "
         "VALUES (:user_free, :org_b, NULL, 'viewer', 'active')",
         "own_org",
+        PRIVILEGE,
+        RLS,
     ),
     (
         "new school written into another organization",
         "INSERT INTO schools (organization_id, name, slug) VALUES (:org_b, 'Hop', :slug)",
         "own_org",
+        RLS,  # apm_app may insert schools, so here the policy is what refuses
+        RLS,
     ),
     (
         "new membership with a school of another organization (composite FK)",
         "INSERT INTO memberships (user_id, organization_id, school_id, role, status) "
         "VALUES (:user_free, :org_a, :school_b1, 'viewer', 'active')",
         "own_org",
+        PRIVILEGE,
+        FK,
     ),
 ]
 
 
 @pytest.mark.parametrize("owner", [False, True], ids=["apm_app", "apm_owner"])
-@pytest.mark.parametrize(("description", "sql", "context_name"), HOPS, ids=[h[0] for h in HOPS])
+@pytest.mark.parametrize(
+    ("description", "sql", "context_name", "app_reason", "owner_reason"),
+    HOPS,
+    ids=[h[0] for h in HOPS],
+)
 def test_tenant_hop_is_refused(
     app_engine: Engine,
     admin_engine: Engine,
@@ -289,8 +322,11 @@ def test_tenant_hop_is_refused(
     description: str,
     sql: str,
     context_name: str,
+    app_reason: str,
+    owner_reason: str,
 ) -> None:
     engine = admin_engine if owner else app_engine
+    expected_reason = owner_reason if owner else app_reason
     params = {
         "org_a": tenants.org_a,
         "org_b": tenants.org_b,
@@ -305,9 +341,10 @@ def test_tenant_hop_is_refused(
         transaction(
             engine, owner=owner, context=_context(context_name, tenants, tenants.org_a)
         ) as connection,
-        pytest.raises(DBAPIError),
+        pytest.raises(DBAPIError) as error,
     ):
         connection.execute(text(sql), params)
+    assert expected_reason in str(error.value.orig).lower().replace("row level", "row-level")
 
     # Nothing moved: the subject rows are exactly where the fixture put them.
     with admin_engine.connect() as connection:

@@ -217,3 +217,86 @@ def test_there_is_no_system_mode_or_open_policy(admin_engine: Engine) -> None:
         assert check.strip().lower() != "true", name
         assert "sistema" not in qual + check, name
         assert "system" not in qual + check, name
+
+
+# --- the grants of apm_app, exactly (a grant added by mistake or by tampering fails here) ---------
+
+ALL_COLUMNS = {
+    "organizations": {"id", "name", "slug", "created_at", "updated_at"},
+    "schools": {"id", "organization_id", "name", "slug", "created_at", "updated_at"},
+    "memberships": {
+        "id",
+        "user_id",
+        "organization_id",
+        "school_id",
+        "role",
+        "status",
+        "created_at",
+        "updated_at",
+    },
+    "users": {"id", "email", "full_name", "password_hash", "is_active", "created_at", "updated_at"},
+}
+# Effective privilege (table-level or column-level) per column, per privilege, for apm_app.
+SELECTABLE = {
+    "organizations": ALL_COLUMNS["organizations"],
+    "schools": ALL_COLUMNS["schools"],
+    "memberships": ALL_COLUMNS["memberships"],
+    # Everything but password_hash, until authentication exists.
+    "users": ALL_COLUMNS["users"] - {"password_hash"},
+}
+INSERTABLE = {
+    "organizations": set(),
+    "schools": ALL_COLUMNS["schools"],
+    "memberships": set(),
+    "users": set(),
+}
+# Never id, organization_id, school_id, user_id or created_at (M1): only what changes business data.
+UPDATABLE = {
+    "organizations": {"name", "updated_at"},
+    "schools": {"name", "updated_at"},
+    "memberships": {"role", "status", "updated_at"},
+    "users": set(),
+}
+DELETABLE = {"memberships"}
+
+
+def _column_privilege(admin_engine: Engine, privilege: str) -> dict[str, set[str]]:
+    result: dict[str, set[str]] = {table: set() for table in ALL_COLUMNS}
+    with admin_engine.connect() as connection:
+        for table, columns in ALL_COLUMNS.items():
+            for column in columns:
+                allowed: Any = connection.execute(
+                    text("SELECT has_column_privilege('apm_app', :t, :c, :p)"),
+                    {"t": table, "c": column, "p": privilege},
+                ).scalar_one()
+                if allowed:
+                    result[table].add(column)
+    return result
+
+
+@pytest.mark.parametrize(
+    ("privilege", "expected"),
+    [("SELECT", SELECTABLE), ("INSERT", INSERTABLE), ("UPDATE", UPDATABLE)],
+)
+def test_application_role_column_privileges_are_exactly_these(
+    admin_engine: Engine, privilege: str, expected: dict[str, set[str]]
+) -> None:
+    assert _column_privilege(admin_engine, privilege) == expected
+
+
+def test_application_role_table_privileges_are_exactly_these(admin_engine: Engine) -> None:
+    with admin_engine.connect() as connection:
+        rows = connection.execute(
+            text(
+                "SELECT table_name, privilege_type FROM information_schema.table_privileges "
+                "WHERE grantee = 'apm_app' AND table_schema = 'public' ORDER BY 1, 2"
+            )
+        ).all()
+
+    assert {tuple(row) for row in rows} == {
+        ("organizations", "SELECT"),
+        ("schools", "SELECT"),
+        ("schools", "INSERT"),
+        ("memberships", "SELECT"),
+        ("memberships", "DELETE"),
+    }
