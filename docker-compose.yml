@@ -1,5 +1,19 @@
 name: apm-digital
 
+# Three database identities (see docs/tenancy.md):
+#   POSTGRES_USER  admin: creates roles and runs migrations/seed/tests. Never inside the API process.
+#   apm_owner      NOLOGIN role that owns the tables (migrations run DDL as it).
+#   apm_app        what the API connects as: no superuser, no BYPASSRLS, not the owner.
+x-api-build: &api-build
+  context: ./apps/api
+  target: dev
+
+# Only the one-shot and tool services get the admin URL.
+x-tool-env: &tool-env
+  ENV: ${ENV:-development}
+  DATABASE_URL: postgresql+psycopg://apm_app:${APP_DB_PASSWORD:?copy .env.example to .env}@db:5432/${POSTGRES_DB:?copy .env.example to .env}
+  DATABASE_ADMIN_URL: postgresql+psycopg://${POSTGRES_USER:?copy .env.example to .env}:${POSTGRES_PASSWORD:?copy .env.example to .env}@db:5432/${POSTGRES_DB:?copy .env.example to .env}
+
 services:
   db:
     image: postgres:16
@@ -18,18 +32,28 @@ services:
       retries: 10
       start_period: 5s
 
+  # One-shot: applies migrations (creates the roles, tables, policies and grants), then exits.
+  migrate:
+    build: *api-build
+    environment: *tool-env
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
   api:
-    build:
-      context: ./apps/api
-      target: dev
+    build: *api-build
     environment:
       ENV: ${ENV:-development}
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?copy .env.example to .env}:${POSTGRES_PASSWORD:?copy .env.example to .env}@db:5432/${POSTGRES_DB:?copy .env.example to .env}
+      DATABASE_URL: postgresql+psycopg://apm_app:${APP_DB_PASSWORD:?copy .env.example to .env}@db:5432/${POSTGRES_DB:?copy .env.example to .env}
     ports:
       - "127.0.0.1:${API_HOST_PORT:-8001}:8000"
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     healthcheck:
       test:
         - CMD
@@ -40,6 +64,18 @@ services:
       timeout: 5s
       retries: 10
       start_period: 5s
+
+  # Not started by `up`. Usage: docker compose run --rm tools <command> (pytest, alembic, python -m app.seed).
+  tools:
+    build: *api-build
+    profiles: ["tools"]
+    environment: *tool-env
+    command: ["python", "-c", "print('usage: docker compose run --rm tools <command>')"]
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   db_data:
