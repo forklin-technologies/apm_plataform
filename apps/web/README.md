@@ -26,7 +26,8 @@ npm run start -- -p 3100 -H 127.0.0.1
 | `npm run build` / `start` | build e servidor de produção |
 | `npm run lint` | ESLint |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm test` | Vitest + Testing Library |
+| `npm test` | Vitest + Testing Library (inclui os guardas de CSS/animação) |
+| `npm run test:e2e` | Playwright em WebKit e Chromium (precisa de `npx playwright install webkit chromium` uma vez) |
 
 ## Variáveis de ambiente
 
@@ -65,6 +66,27 @@ src/proxy.ts      CSP com nonce por requisição
   e `poweredByHeader` desligado (`next.config.ts`). HSTS fica com o proxy reverso (HTTPS).
 - Sem `dangerouslySetInnerHTML` (regra de lint). Sem segredos e sem `NEXT_PUBLIC_*`.
 - Em produção, o proxy reverso não deve sobrescrever o `Content-Security-Policy` das páginas.
+
+## Animações são melhoria progressiva (WebKit, portal do Maestri)
+
+O estado base de **todo** conteúdo é visível. O WebKit **congela a linha do tempo das animações** com o
+documento oculto (aba em segundo plano, portal do Maestri, WKWebView fora da tela): uma animação de
+entrada parada em `t=0` mantém o keyframe inicial para sempre, e `opacity: 0` vira conteúdo invisível
+(foi o defeito da rodada 1). Por isso:
+
+- nenhum `@keyframes` parte de `opacity: 0` (só `transform` ou traçado decorativo);
+- toda animação de entrada só existe sob `[data-motion="on"]`, que o `MotionGate` liga **apenas** com o
+  documento visível; oculto, o conteúdo aparece direto no estado final;
+- as animações de passo só rodam depois de uma ação do usuário, nunca no carregamento da página;
+- o polling do chip da API não para com o documento oculto, só fica mais lento (60 s).
+
+Guardas: `src/app/motion-css.test.ts` (Vitest) e `e2e/visible-content.spec.ts` (WebKit e Chromium nos
+cenários `normal`, `frozen`, com TODA animação pausada em t=0, e `hidden`, com o documento oculto).
+O e2e falha se algum texto visível ficar com opacidade efetiva < 0,9.
+
+Observação para quem testa pelo portal do Maestri: a CSP de produção não permite `eval`, então
+`maestri portal evaluate` não funciona na prévia (3100); `snapshot`, `click`, `fill` e `screenshot`
+funcionam. Para `evaluate`, use o `npm run dev` (3101).
 
 ## Acessibilidade e movimento
 
