@@ -113,6 +113,15 @@ FAILING_CONFIGS = [
         "Pa@zQ7mKt?x9",
         HINT_MESSAGE,
     ),
+    # "@" then "[...]": SQLAlchemy reads "[PWDTOKEN]" as an IPv6 host and silently ignores the
+    # rest of the string, so the host would be "PWDTOKEN" and the DNS error would print it.
+    _case(
+        "unescaped-at-then-brackets",
+        "production",
+        "postgresql+psycopg://apm:@[PWDTOKEN]@db:5432/apm",
+        "@[PWDTOKEN]",
+        HINT_MESSAGE,
+    ),
     _case(
         "whitespace-in-host",
         "production",

@@ -41,19 +41,19 @@ class Settings(BaseSettings):
         url = value.get_secret_value()
         if not url.startswith(DATABASE_URL_PREFIX):
             raise ValueError(f"DATABASE_URL must start with {DATABASE_URL_PREFIX}")
+        # A valid URL has at most one "@" (the userinfo/host separator). An unescaped "@" in the
+        # password always adds another one, and SQLAlchemy would then read part of the password
+        # as the host, database or query, or silently ignore it, and the driver's errors would
+        # print it in the logs. So this rule is exact, with no per-field special cases.
+        if url.count("@") > 1:
+            raise ValueError(INVALID_DATABASE_URL_MESSAGE)
         try:
             parsed = make_url(url)
         except Exception:
             # SQLAlchemy parse errors can quote part of the URL (e.g. the password read as a
             # port), so drop the original exception and report a fixed message.
             raise ValueError(INVALID_DATABASE_URL_MESSAGE) from None
-        host = parsed.host or ""
-        # An unescaped "@" in the password makes SQLAlchemy read the rest of the URL wrongly: the
-        # tail of the password becomes the host, or the database when a "/" follows it, or is
-        # thrown into the query (which SQLAlchemy then drops) when a "?" follows it. The driver's
-        # errors would print those pieces in the logs, so reject any "@" outside the userinfo.
-        misread_parts = (host, parsed.database or "", url.partition("?")[2])
-        if any("@" in part for part in misread_parts) or any(char.isspace() for char in host):
+        if any(char.isspace() for char in parsed.host or ""):
             raise ValueError(INVALID_DATABASE_URL_MESSAGE)
         return value
 
