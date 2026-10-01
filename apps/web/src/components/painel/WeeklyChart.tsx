@@ -100,7 +100,7 @@ export function WeeklyChart({ weekly, periodLabel }: { weekly: WeeklyTotal[]; pe
                     {active === index && (
                       <div
                         aria-hidden="true"
-                        className={`pointer-events-none absolute top-0 z-10 w-44 -translate-y-[calc(100%+6px)] rounded-[var(--r-md)] bg-raised p-3 text-left shadow-[var(--shadow-float)] ${edge}`}
+                        className={`pointer-events-none absolute top-0 z-10 w-max min-w-44 -translate-y-[calc(100%+6px)] rounded-[var(--r-md)] bg-raised p-3 text-left shadow-[var(--shadow-float)] ${edge}`}
                       >
                         <p className="text-foot text-ink-2">Dias {week.label}</p>
                         <p className="mt-1 flex items-center justify-between gap-3 text-sub">
