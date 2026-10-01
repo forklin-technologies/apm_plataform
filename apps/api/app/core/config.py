@@ -48,9 +48,12 @@ class Settings(BaseSettings):
             # port), so drop the original exception and report a fixed message.
             raise ValueError(INVALID_DATABASE_URL_MESSAGE) from None
         host = parsed.host or ""
-        if "@" in host or any(char.isspace() for char in host):
-            # An unescaped "@" in the password makes SQLAlchemy read part of the password as
-            # the host, and the driver's DNS error would then print it in the logs.
+        # An unescaped "@" in the password makes SQLAlchemy read the rest of the URL wrongly: the
+        # tail of the password becomes the host, or the database when a "/" follows it, or is
+        # thrown into the query (which SQLAlchemy then drops) when a "?" follows it. The driver's
+        # errors would print those pieces in the logs, so reject any "@" outside the userinfo.
+        misread_parts = (host, parsed.database or "", url.partition("?")[2])
+        if any("@" in part for part in misread_parts) or any(char.isspace() for char in host):
             raise ValueError(INVALID_DATABASE_URL_MESSAGE)
         return value
 

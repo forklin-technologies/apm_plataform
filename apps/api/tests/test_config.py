@@ -87,3 +87,12 @@ def test_accepts_percent_encoded_special_characters_in_password(
 
     password = make_url(settings.database_url.get_secret_value()).password
     assert password == "Wq8Zk@3Xp9Lm"  # noqa: S105  (fake password)
+
+
+def test_accepts_a_legitimate_query_string(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("ENV", "development")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://apm:pw@db:5432/apm?sslmode=require")
+
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+
+    assert make_url(settings.database_url.get_secret_value()).query == {"sslmode": "require"}

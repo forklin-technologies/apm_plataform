@@ -96,6 +96,23 @@ FAILING_CONFIGS = [
         PASSWORD_WITH_AT,
         HINT_MESSAGE,
     ),
+    # "@" then "/": the rest of the password is read as the database ("word9@db:5432/apm").
+    _case(
+        "unescaped-at-then-slash",
+        "production",
+        "postgresql+psycopg://apm:Pa@ss/word9@db:5432/apm",
+        "Pa@ss/word9",
+        HINT_MESSAGE,
+    ),
+    # "@" then "?": the real "@" lands in the query, which SQLAlchemy drops, so the tail of the
+    # password ("zQ7mKt") would be read as the host and printed by the DNS error.
+    _case(
+        "unescaped-at-then-question-mark",
+        "production",
+        "postgresql+psycopg://apm:Pa@zQ7mKt?x9@db:5432/apm",
+        "Pa@zQ7mKt?x9",
+        HINT_MESSAGE,
+    ),
     _case(
         "whitespace-in-host",
         "production",
