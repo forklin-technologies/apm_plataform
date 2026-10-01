@@ -25,7 +25,11 @@ def _in_list(column: str, values: tuple[str, ...]) -> str:
 
 
 class Membership(TimestampMixin, Base):
-    """What a user may do in a tenant. school_id NULL means the whole organization."""
+    """What a user may do in a tenant. school_id NULL means the whole organization.
+
+    The application role cannot INSERT memberships nor UPDATE user_id, organization_id or school_id
+    (migration 0005, docs/tenancy.md): creating one goes through the invitation flow of TASK-004.
+    """
 
     __tablename__ = "memberships"
     __table_args__ = (
