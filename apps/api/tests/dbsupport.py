@@ -46,14 +46,18 @@ class Tenants:
 def create_tenants(connection: Connection) -> Tenants:
     """Insert the fixture rows as the admin (a superuser in development, so RLS is bypassed)."""
     suffix = uuid.uuid4().hex[:10]
-    ids = {name: uuid.uuid4() for name in Tenants.__annotations__ if name not in ("slugs", "emails")}
+    ids = {
+        name: uuid.uuid4() for name in Tenants.__annotations__ if name not in ("slugs", "emails")
+    }
     slugs = tuple(f"t3-{name}-{suffix}" for name in ("org-a", "org-b", "s-a1", "s-a2", "s-b1"))
     emails = tuple(
-        f"t3-{name}-{suffix}@example.test"
-        for name in ("a1", "a2", "admin-a", "b1", "free")
+        f"t3-{name}-{suffix}@example.test" for name in ("a1", "a2", "admin-a", "b1", "free")
     )
     connection.execute(
-        text("INSERT INTO organizations (id, name, slug) VALUES (:a, 'Org A', :sa), (:b, 'Org B', :sb)"),
+        text(
+            "INSERT INTO organizations (id, name, slug) "
+            "VALUES (:a, 'Org A', :sa), (:b, 'Org B', :sb)"
+        ),
         {"a": ids["org_a"], "b": ids["org_b"], "sa": slugs[0], "sb": slugs[1]},
     )
     connection.execute(
@@ -72,7 +76,8 @@ def create_tenants(connection: Connection) -> Tenants:
             "s3": slugs[4],
         },
     )
-    for key, email in zip(("user_a1", "user_a2", "user_admin_a", "user_b1", "user_free"), emails):
+    user_keys = ("user_a1", "user_a2", "user_admin_a", "user_b1", "user_free")
+    for key, email in zip(user_keys, emails, strict=True):
         connection.execute(
             text("INSERT INTO users (id, email, full_name) VALUES (:id, :email, 'Test User')"),
             {"id": ids[key], "email": email},
@@ -96,13 +101,15 @@ def create_tenants(connection: Connection) -> Tenants:
                 "role": role,
             },
         )
-    return Tenants(slugs=slugs, emails=emails, **ids)  # type: ignore[arg-type]
+    return Tenants(slugs=slugs, emails=emails, **ids)
 
 
 def delete_tenants(connection: Connection, tenants: Tenants) -> None:
     """Remove exactly the rows create_tenants made (and anything a test left under them)."""
     org_ids = [tenants.org_a, tenants.org_b]
-    connection.execute(text("DELETE FROM memberships WHERE organization_id = ANY(:o)"), {"o": org_ids})
+    connection.execute(
+        text("DELETE FROM memberships WHERE organization_id = ANY(:o)"), {"o": org_ids}
+    )
     connection.execute(
         text("DELETE FROM users WHERE email = ANY(:e) OR id = ANY(:u)"),
         {"e": list(tenants.emails), "u": [tenants.user_a1, tenants.user_free]},

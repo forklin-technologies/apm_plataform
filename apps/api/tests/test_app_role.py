@@ -1,5 +1,7 @@
 """T4: what the application role can and cannot do, one assertion per promise in ADR-014."""
 
+from typing import Any
+
 import pytest
 from sqlalchemy import Engine, text
 from sqlalchemy.exc import DBAPIError, ProgrammingError
@@ -60,7 +62,8 @@ def test_owner_role_cannot_log_in_and_is_not_a_superuser(admin_engine: Engine) -
     with admin_engine.connect() as connection:
         role = connection.execute(
             text(
-                "SELECT rolcanlogin, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'apm_owner'"
+                "SELECT rolcanlogin, rolsuper, rolbypassrls FROM pg_roles "
+                "WHERE rolname = 'apm_owner'"
             )
         ).one()
 
@@ -89,9 +92,8 @@ def test_owner_role_cannot_log_in_and_is_not_a_superuser(admin_engine: Engine) -
 def test_application_role_cannot_change_schema_or_security(
     app_engine: Engine, statement: str
 ) -> None:
-    with transaction(app_engine) as connection:
-        with pytest.raises(ProgrammingError):
-            connection.execute(text(statement))
+    with transaction(app_engine) as connection, pytest.raises(ProgrammingError):
+        connection.execute(text(statement))
 
 
 def test_application_role_cannot_grant_itself_more_privileges(app_engine: Engine) -> None:
@@ -119,12 +121,10 @@ def test_cannot_set_role_to_owner_or_admin(
     admin_user = make_url(admin_settings.database_admin_url.get_secret_value()).username
     assert admin_user is not None
     for target in ("apm_owner", admin_user):
-        with transaction(app_engine) as connection:
-            with pytest.raises(DBAPIError):
-                connection.exec_driver_sql(f'SET ROLE "{target}"')
-        with transaction(app_engine) as connection:
-            with pytest.raises(DBAPIError):
-                connection.exec_driver_sql(f'SET SESSION AUTHORIZATION "{target}"')
+        with transaction(app_engine) as connection, pytest.raises(DBAPIError):
+            connection.exec_driver_sql(f'SET ROLE "{target}"')
+        with transaction(app_engine) as connection, pytest.raises(DBAPIError):
+            connection.exec_driver_sql(f'SET SESSION AUTHORIZATION "{target}"')
 
 
 def test_row_security_off_never_leaks(app_engine: Engine, tenants: Tenants) -> None:
@@ -137,7 +137,9 @@ def test_row_security_off_never_leaks(app_engine: Engine, tenants: Tenants) -> N
                 rows = connection.execute(text(f"SELECT id FROM {table}")).all()  # noqa: S608
             except DBAPIError:
                 continue  # an error is the expected outcome for a role without BYPASSRLS
-            foreign = connection.execute(text("SELECT 1")).scalar_one()  # connection still usable
+            foreign: Any = connection.execute(
+                text("SELECT 1")
+            ).scalar_one()  # connection still usable
             assert foreign == 1
         shown = {row[0] for row in rows}
         assert tenants.org_b not in shown
@@ -146,12 +148,17 @@ def test_row_security_off_never_leaks(app_engine: Engine, tenants: Tenants) -> N
 
 
 def test_password_hash_is_not_readable(app_engine: Engine, tenants: Tenants) -> None:
-    with transaction(app_engine, context=TenantContext(tenants.org_a)) as connection:
-        with pytest.raises(ProgrammingError):
-            connection.execute(text("SELECT password_hash FROM users"))
-    with transaction(app_engine, context=TenantContext(tenants.org_a)) as connection:
-        with pytest.raises(ProgrammingError):
-            connection.execute(text("SELECT * FROM users"))
+    own = TenantContext(tenants.org_a)
+    with (
+        transaction(app_engine, context=own) as connection,
+        pytest.raises(ProgrammingError),
+    ):
+        connection.execute(text("SELECT password_hash FROM users"))
+    with (
+        transaction(app_engine, context=own) as connection,
+        pytest.raises(ProgrammingError),
+    ):
+        connection.execute(text("SELECT * FROM users"))
     with transaction(app_engine, context=TenantContext(tenants.org_a)) as connection:
         columns = connection.execute(
             text("SELECT id, email, full_name, is_active, created_at, updated_at FROM users")
@@ -160,9 +167,8 @@ def test_password_hash_is_not_readable(app_engine: Engine, tenants: Tenants) -> 
 
 
 def test_role_password_hashes_are_not_readable(app_engine: Engine) -> None:
-    with transaction(app_engine) as connection:
-        with pytest.raises(ProgrammingError):
-            connection.execute(text("SELECT rolpassword FROM pg_authid"))
+    with transaction(app_engine) as connection, pytest.raises(ProgrammingError):
+        connection.execute(text("SELECT rolpassword FROM pg_authid"))
 
 
 def test_no_security_definer_function_exists(admin_engine: Engine) -> None:

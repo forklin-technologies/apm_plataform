@@ -10,6 +10,7 @@ to run twice: rows that already exist are left alone.
 import os
 import sys
 from dataclasses import dataclass, field
+from typing import Any
 
 from sqlalchemy import Connection, create_engine, text
 
@@ -65,7 +66,10 @@ def seed(connection: Connection) -> SeedSummary:
 
     for slug, name in ORGANIZATIONS:
         result = connection.execute(
-            text("INSERT INTO organizations (name, slug) VALUES (:name, :slug) ON CONFLICT DO NOTHING"),
+            text(
+                "INSERT INTO organizations (name, slug) VALUES (:name, :slug) "
+                "ON CONFLICT DO NOTHING"
+            ),
             {"name": name, "slug": slug},
         )
         count("organizations", result.rowcount)
@@ -82,7 +86,10 @@ def seed(connection: Connection) -> SeedSummary:
     for email, full_name in USERS:
         # password_hash stays NULL: authentication does not exist yet (TASK-004).
         result = connection.execute(
-            text("INSERT INTO users (email, full_name) VALUES (:email, :full_name) ON CONFLICT DO NOTHING"),
+            text(
+                "INSERT INTO users (email, full_name) VALUES (:email, :full_name) "
+                "ON CONFLICT DO NOTHING"
+            ),
             {"email": email, "full_name": full_name},
         )
         count("users", result.rowcount)
@@ -117,7 +124,7 @@ def main() -> int:
     engine = create_engine(settings.database_admin_url.get_secret_value())
     try:
         with engine.begin() as connection:
-            bypasses_rls = connection.execute(
+            bypasses_rls: Any = connection.execute(
                 text("SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user")
             ).scalar_one()
             if not bypasses_rls:

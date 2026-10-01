@@ -3,6 +3,7 @@ through the connection pool. Plus the ORM behaviour that depends on it."""
 
 import uuid
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from fastapi import Depends, FastAPI
@@ -21,11 +22,14 @@ SCHOOLS_IN_A = 2
 
 
 def _school_count(session: Session, tenants: Tenants) -> int:
-    return session.scalar(
-        select(func.count()).select_from(School).where(
-            School.id.in_([tenants.school_a1, tenants.school_a2, tenants.school_b1])
+    return (
+        session.scalar(
+            select(func.count())
+            .select_from(School)
+            .where(School.id.in_([tenants.school_a1, tenants.school_a2, tenants.school_b1]))
         )
-    ) or 0
+        or 0
+    )
 
 
 @pytest.fixture
@@ -85,15 +89,15 @@ def test_context_does_not_leak_to_the_next_user_of_the_same_pooled_connection(
 ) -> None:
     factory = sessionmaker(single_connection_engine)
     with tenant_session(factory, TenantContext(tenants.org_a, tenants.school_a1)) as first:
-        first_pid = first.execute(text("SELECT pg_backend_pid()")).scalar_one()
+        first_pid: Any = first.execute(text("SELECT pg_backend_pid()")).scalar_one()
         assert _school_count(first, tenants) == 1
 
     with factory() as second:  # no context bound
-        second_pid = second.execute(text("SELECT pg_backend_pid()")).scalar_one()
-        organization_setting = second.execute(
+        second_pid: Any = second.execute(text("SELECT pg_backend_pid()")).scalar_one()
+        organization_setting: Any = second.execute(
             text("SELECT current_setting('app.organization_id', true)")
         ).scalar_one()
-        school_setting = second.execute(
+        school_setting: Any = second.execute(
             text("SELECT current_setting('app.school_id', true)")
         ).scalar_one()
         visible = _school_count(second, tenants)
@@ -108,9 +112,10 @@ def test_context_is_gone_after_an_error_and_a_rollback(
     single_connection_engine: Engine, tenants: Tenants
 ) -> None:
     factory = sessionmaker(single_connection_engine)
-    with pytest.raises(RuntimeError), tenant_session(
-        factory, TenantContext(tenants.org_a)
-    ) as session:
+    with (
+        pytest.raises(RuntimeError),
+        tenant_session(factory, TenantContext(tenants.org_a)) as session,
+    ):
         assert _school_count(session, tenants) == SCHOOLS_IN_A
         raise RuntimeError("boom")
 
@@ -124,10 +129,10 @@ def test_the_setting_is_transaction_local_not_session_wide(
     with single_connection_engine.connect() as connection:
         with connection.begin():
             apply_tenant_context(connection, TenantContext(tenants.org_a))
-            inside = connection.execute(
+            inside: Any = connection.execute(
                 text("SELECT current_setting('app.organization_id', true)")
             ).scalar_one()
-        after = connection.execute(
+        after: Any = connection.execute(
             text("SELECT current_setting('app.organization_id', true)")
         ).scalar_one()
 
@@ -187,11 +192,15 @@ def test_orm_insert_in_own_organization_works_and_in_another_is_refused(
     factory = sessionmaker(app_engine)
     with factory() as session:
         bind_tenant(session, TenantContext(tenants.org_a))
-        session.add(School(organization_id=tenants.org_a, name="ORM", slug=f"t3-orm-{uuid.uuid4().hex[:8]}"))
+        session.add(
+            School(organization_id=tenants.org_a, name="ORM", slug=f"t3-orm-{uuid.uuid4().hex[:8]}")
+        )
         session.flush()  # allowed
         session.rollback()
 
-        session.add(School(organization_id=tenants.org_b, name="Hop", slug=f"t3-hop-{uuid.uuid4().hex[:8]}"))
+        session.add(
+            School(organization_id=tenants.org_b, name="Hop", slug=f"t3-hop-{uuid.uuid4().hex[:8]}")
+        )
         with pytest.raises(DBAPIError):
             session.flush()  # row-level security: WITH CHECK
         session.rollback()

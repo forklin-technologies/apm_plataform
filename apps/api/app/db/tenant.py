@@ -59,7 +59,9 @@ def apply_tenant_context(connection: Connection, context: TenantContext) -> None
     )
 
 
-def _apply_on_begin(session: Session, _transaction: SessionTransaction, connection: Connection) -> None:
+def _apply_on_begin(
+    session: Session, _transaction: SessionTransaction, connection: Connection
+) -> None:
     context = session.info.get(_CONTEXT_KEY)
     if context is not None:
         apply_tenant_context(connection, context)

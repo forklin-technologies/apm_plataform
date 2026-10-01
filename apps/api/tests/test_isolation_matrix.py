@@ -85,43 +85,86 @@ def _fresh() -> str:
 Statement = tuple[str, dict[str, Any], str]
 STATEMENTS: dict[tuple[str, str], Callable[[Tenants, uuid.UUID], Statement]] = {
     ("organizations", "select"): lambda t, new: (
-        "SELECT count(*) FROM organizations WHERE id = :id", {"id": t.org_a}, "count"),
+        "SELECT count(*) FROM organizations WHERE id = :id",
+        {"id": t.org_a},
+        "count",
+    ),
     ("organizations", "insert"): lambda t, new: (
         "INSERT INTO organizations (id, name, slug) VALUES (:id, 'Fresh', :slug)",
-        {"id": new, "slug": f"t3-new-{_fresh()}"}, "rowcount"),
+        {"id": new, "slug": f"t3-new-{_fresh()}"},
+        "rowcount",
+    ),
     ("organizations", "update"): lambda t, new: (
-        "UPDATE organizations SET name = 'Renamed' WHERE id = :id", {"id": t.org_a}, "rowcount"),
+        "UPDATE organizations SET name = 'Renamed' WHERE id = :id",
+        {"id": t.org_a},
+        "rowcount",
+    ),
     ("organizations", "delete"): lambda t, new: (
-        "DELETE FROM organizations WHERE id = :id", {"id": t.org_a}, "rowcount"),
+        "DELETE FROM organizations WHERE id = :id",
+        {"id": t.org_a},
+        "rowcount",
+    ),
     ("schools", "select"): lambda t, new: (
-        "SELECT count(*) FROM schools WHERE id = :id", {"id": t.school_a1}, "count"),
+        "SELECT count(*) FROM schools WHERE id = :id",
+        {"id": t.school_a1},
+        "count",
+    ),
     ("schools", "insert"): lambda t, new: (
         "INSERT INTO schools (organization_id, name, slug) VALUES (:org, 'Fresh', :slug)",
-        {"org": t.org_a, "slug": f"t3-new-{_fresh()}"}, "rowcount"),
+        {"org": t.org_a, "slug": f"t3-new-{_fresh()}"},
+        "rowcount",
+    ),
     ("schools", "update"): lambda t, new: (
-        "UPDATE schools SET name = 'Renamed' WHERE id = :id", {"id": t.school_a1}, "rowcount"),
+        "UPDATE schools SET name = 'Renamed' WHERE id = :id",
+        {"id": t.school_a1},
+        "rowcount",
+    ),
     ("schools", "delete"): lambda t, new: (
-        "DELETE FROM schools WHERE id = :id", {"id": t.school_a1}, "rowcount"),
+        "DELETE FROM schools WHERE id = :id",
+        {"id": t.school_a1},
+        "rowcount",
+    ),
     ("memberships", "select"): lambda t, new: (
-        "SELECT count(*) FROM memberships WHERE id = :id", {"id": t.membership_a1}, "count"),
+        "SELECT count(*) FROM memberships WHERE id = :id",
+        {"id": t.membership_a1},
+        "count",
+    ),
     ("memberships", "insert"): lambda t, new: (
         "INSERT INTO memberships (user_id, organization_id, school_id, role, status) "
         "VALUES (:user, :org, :school, 'staff', 'active')",
-        {"user": t.user_free, "org": t.org_a, "school": t.school_a1}, "rowcount"),
+        {"user": t.user_free, "org": t.org_a, "school": t.school_a1},
+        "rowcount",
+    ),
     ("memberships", "update"): lambda t, new: (
         "UPDATE memberships SET status = 'suspended' WHERE id = :id",
-        {"id": t.membership_a1}, "rowcount"),
+        {"id": t.membership_a1},
+        "rowcount",
+    ),
     ("memberships", "delete"): lambda t, new: (
-        "DELETE FROM memberships WHERE id = :id", {"id": t.membership_a1}, "rowcount"),
+        "DELETE FROM memberships WHERE id = :id",
+        {"id": t.membership_a1},
+        "rowcount",
+    ),
     ("users", "select"): lambda t, new: (
-        "SELECT count(*) FROM users WHERE id = :id", {"id": t.user_a1}, "count"),
+        "SELECT count(*) FROM users WHERE id = :id",
+        {"id": t.user_a1},
+        "count",
+    ),
     ("users", "insert"): lambda t, new: (
         "INSERT INTO users (email, full_name) VALUES (:email, 'Fresh')",
-        {"email": f"t3-new-{_fresh()}@example.test"}, "rowcount"),
+        {"email": f"t3-new-{_fresh()}@example.test"},
+        "rowcount",
+    ),
     ("users", "update"): lambda t, new: (
-        "UPDATE users SET full_name = 'Renamed' WHERE id = :id", {"id": t.user_a1}, "rowcount"),
+        "UPDATE users SET full_name = 'Renamed' WHERE id = :id",
+        {"id": t.user_a1},
+        "rowcount",
+    ),
     ("users", "delete"): lambda t, new: (
-        "DELETE FROM users WHERE id = :id", {"id": t.user_a1}, "rowcount"),
+        "DELETE FROM users WHERE id = :id",
+        {"id": t.user_a1},
+        "rowcount",
+    ),
 }
 
 
@@ -258,11 +301,13 @@ def test_tenant_hop_is_refused(
         "user_free": tenants.user_free,
         "slug": f"t3-hop-{_fresh()}",
     }
-    with transaction(
-        engine, owner=owner, context=_context(context_name, tenants, tenants.org_a)
-    ) as connection:
-        with pytest.raises(DBAPIError):
-            connection.execute(text(sql), params)
+    with (
+        transaction(
+            engine, owner=owner, context=_context(context_name, tenants, tenants.org_a)
+        ) as connection,
+        pytest.raises(DBAPIError),
+    ):
+        connection.execute(text(sql), params)
 
     # Nothing moved: the subject rows are exactly where the fixture put them.
     with admin_engine.connect() as connection:
@@ -270,9 +315,15 @@ def test_tenant_hop_is_refused(
             text("SELECT organization_id, school_id FROM memberships WHERE id = :m"),
             {"m": tenants.membership_a1},
         ).one() == (tenants.org_a, tenants.school_a1)
-        assert connection.execute(
-            text("SELECT organization_id FROM schools WHERE id = :s"), {"s": tenants.school_a1}
-        ).scalar_one() == tenants.org_a
-        assert connection.execute(
-            text("SELECT count(*) FROM organizations WHERE id = :o"), {"o": tenants.org_a}
-        ).scalar_one() == 1
+        assert (
+            connection.execute(
+                text("SELECT organization_id FROM schools WHERE id = :s"), {"s": tenants.school_a1}
+            ).scalar_one()
+            == tenants.org_a
+        )
+        assert (
+            connection.execute(
+                text("SELECT count(*) FROM organizations WHERE id = :o"), {"o": tenants.org_a}
+            ).scalar_one()
+            == 1
+        )
