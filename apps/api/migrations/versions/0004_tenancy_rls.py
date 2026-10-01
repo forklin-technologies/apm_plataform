@@ -108,7 +108,7 @@ def downgrade() -> None:
         ("users", ("select",)),
     ):
         for policy in policies:
-            op.execute(f"DROP POLICY {table}_{policy} ON {table}")
+            op.execute(f"DROP POLICY IF EXISTS {table}_{policy} ON {table}")
     for table in TABLES:
         op.execute(f"ALTER TABLE {table} NO FORCE ROW LEVEL SECURITY")
         op.execute(f"ALTER TABLE {table} DISABLE ROW LEVEL SECURITY")

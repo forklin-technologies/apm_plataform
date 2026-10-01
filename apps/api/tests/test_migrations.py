@@ -263,6 +263,49 @@ def test_a_failure_while_setting_the_password_does_not_reveal_it(
     assert error.value.__suppress_context__ is True
 
 
+class _RecordingDriver:
+    """Records what the migration sends to the server instead of sending it."""
+
+    def __init__(self) -> None:
+        self.statements: list[str] = []
+        self.pgconn = SimpleNamespace(encrypt_password=self._encrypt)
+
+    @staticmethod
+    def _encrypt(password: bytes, user: bytes, algorithm: bytes) -> bytes:
+        assert user == b"apm_app"
+        assert algorithm == b"scram-sha-256"
+        return b"SCRAM-SHA-256$4096:c2FsdA==$c3RvcmVk:c2VydmVy"
+
+    def execute(self, statement: Any) -> None:
+        self.statements.append(statement.as_string())
+
+
+def test_the_statement_sent_to_the_server_carries_a_verifier_never_the_password(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    migration = _load_roles_migration()
+    url = f"postgresql+psycopg://apm_app:{CANARY_PASSWORD}@db:5432/apm"
+    driver = _RecordingDriver()
+    monkeypatch.setattr(migration.context, "is_offline_mode", lambda: False)
+    monkeypatch.setattr(
+        migration,
+        "get_admin_settings",
+        lambda: SimpleNamespace(database_url=SimpleNamespace(get_secret_value=lambda: url)),
+    )
+    monkeypatch.setattr(
+        migration.op,
+        "get_bind",
+        lambda: SimpleNamespace(connection=SimpleNamespace(driver_connection=driver)),
+        raising=False,
+    )
+
+    migration._set_app_password()
+
+    (statement,) = driver.statements
+    assert statement.startswith('ALTER ROLE "apm_app" PASSWORD \'SCRAM-SHA-256$4096:')
+    assert CANARY_PASSWORD not in statement
+
+
 def test_database_url_without_a_password_is_refused_with_a_fixed_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

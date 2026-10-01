@@ -120,8 +120,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.execute("SET LOCAL ROLE apm_owner")
-    op.execute("DROP TABLE memberships")
-    op.execute("DROP TABLE users")
-    op.execute("DROP TABLE schools")
-    op.execute("DROP TABLE organizations")
+    op.execute("DROP TABLE IF EXISTS memberships")
+    op.execute("DROP TABLE IF EXISTS users")
+    op.execute("DROP TABLE IF EXISTS schools")
+    op.execute("DROP TABLE IF EXISTS organizations")
     op.execute("RESET ROLE")
