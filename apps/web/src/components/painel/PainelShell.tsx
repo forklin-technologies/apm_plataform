@@ -165,7 +165,7 @@ export function PainelShell({ organizations, initialSchoolId, initialData, secti
           </div>
         </header>
 
-        <main id="conteudo" className="mx-auto w-full max-w-[68rem] px-5 pb-32 pt-6 lg:px-10 lg:pb-16 lg:pt-10">
+        <main id="conteudo" tabIndex={-1} className="outline-none mx-auto w-full max-w-[68rem] px-5 pb-32 pt-6 lg:px-10 lg:pb-16 lg:pt-10">
           <div className="mb-6 flex flex-wrap items-start justify-between gap-x-6 gap-y-3 lg:mb-8">
             <div>
               <h1 className="text-title text-ink sm:text-[2.25rem]">{title}</h1>

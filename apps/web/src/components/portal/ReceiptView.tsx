@@ -77,9 +77,9 @@ export function ReceiptView({ slug, token, initial }: { slug: string; token: str
           Não pedimos login. Quem tem o link vê este comprovante, então compartilhe com cuidado.
         </p>
         <div className="mt-7 flex flex-col gap-3 sm:flex-row">
-          <Button variant="secondary" onClick={copyLink} aria-describedby="receipt-copy-status">
+          <Button variant="secondary" onClick={copyLink} aria-describedby="receipt-copy-status" aria-label={copied ? undefined : "Copiar link do comprovante"}>
             {copied ? <CheckIcon size={20} className="pop" /> : <CopyIcon size={20} />}
-            {copied ? "Link copiado" : "Copiar link do comprovante"}
+            {copied ? "Link copiado" : "Copiar link"}
           </Button>
           <ButtonLink href={`/apm/${slug}`} variant="plain">
             Fazer outra contribuição

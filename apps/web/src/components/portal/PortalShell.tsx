@@ -23,7 +23,7 @@ export function PortalShell({ school, children }: { school: PublicSchool; childr
           </Link>
         </div>
       </header>
-      <main id="conteudo" className="mx-auto w-full max-w-5xl px-5 pb-16 pt-6 sm:px-8 sm:pt-10">
+      <main id="conteudo" tabIndex={-1} className="outline-none mx-auto w-full max-w-5xl px-5 pb-16 pt-6 sm:px-8 sm:pt-10">
         <PrototypeBadge className="mb-6" />
         {children}
       </main>

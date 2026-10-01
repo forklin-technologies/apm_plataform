@@ -48,7 +48,7 @@ export default async function HomePage() {
         <ApiStatusChip />
       </header>
 
-      <main id="conteudo" className="mx-auto w-full max-w-6xl px-5 pb-16 pt-8 sm:px-8 lg:pt-16">
+      <main id="conteudo" tabIndex={-1} className="outline-none mx-auto w-full max-w-6xl px-5 pb-16 pt-8 sm:px-8 lg:pt-16">
         <div className="grid gap-12 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.8fr)] lg:items-start lg:gap-16">
           <div>
             <PrototypeBadge />

@@ -14,7 +14,7 @@ export default function LoginPage() {
           <Wordmark />
         </Link>
       </header>
-      <main id="conteudo" className="mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-5 pb-20 pt-8">
+      <main id="conteudo" tabIndex={-1} className="outline-none mx-auto flex w-full max-w-md flex-1 flex-col justify-center px-5 pb-20 pt-8">
         <PrototypeBadge className="self-start" />
         <h1 className="mt-5 text-title sm:text-[2.25rem]">Entrar na tesouraria</h1>
         <p className="mt-2 text-body text-ink-2">Acesso para quem cuida das contas da APM. Famílias não precisam de login para contribuir.</p>

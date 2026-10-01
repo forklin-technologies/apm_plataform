@@ -9,7 +9,7 @@ export function NotFoundView({ title, text }: { title: string; text: string }) {
       <header className="mx-auto w-full max-w-6xl px-5 pt-5 sm:px-8 sm:pt-7">
         <Wordmark />
       </header>
-      <main id="conteudo" className="mx-auto flex w-full max-w-6xl flex-1 flex-col justify-center px-5 pb-24 pt-10 sm:px-8">
+      <main id="conteudo" tabIndex={-1} className="outline-none mx-auto flex w-full max-w-6xl flex-1 flex-col justify-center px-5 pb-24 pt-10 sm:px-8">
         <PrototypeBadge className="self-start" />
         <p aria-hidden="true" className="mt-8 text-[6.5rem] font-bold leading-none tracking-[-0.06em] text-ink-3/40 sm:text-[9rem]">
           404

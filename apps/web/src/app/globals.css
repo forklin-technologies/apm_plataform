@@ -213,168 +213,170 @@
 }
 
 /* ------------------------------------------------------------------ componentes */
+@layer components {
 
-/* Barra translucente (topo, abas) */
-.bar-material {
-  background: var(--bar);
-  -webkit-backdrop-filter: saturate(180%) blur(22px);
-  backdrop-filter: saturate(180%) blur(22px);
-}
-@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  /* Barra translucente (topo, abas) */
   .bar-material {
+    background: var(--bar);
+    -webkit-backdrop-filter: saturate(180%) blur(22px);
+    backdrop-filter: saturate(180%) blur(22px);
+  }
+  @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .bar-material {
+      background: var(--surface);
+    }
+  }
+
+  /* Caderno quadriculado: o fundo da primeira dobra */
+  .paper-grid {
+    position: relative;
+    isolation: isolate;
+  }
+  .paper-grid::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-image: linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 28px 28px;
+    background-position: -1px -1px;
+    -webkit-mask-image: linear-gradient(to bottom, #000 25%, transparent 92%);
+    mask-image: linear-gradient(to bottom, #000 25%, transparent 92%);
+  }
+
+  /* Recibo: folha com borda serrilhada embaixo */
+  .receipt-sheet {
     background: var(--surface);
+    border-radius: var(--r-lg) var(--r-lg) 0 0;
   }
-}
-
-/* Caderno quadriculado: o fundo da primeira dobra */
-.paper-grid {
-  position: relative;
-  isolation: isolate;
-}
-.paper-grid::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  background-image: linear-gradient(var(--grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
-  background-size: 28px 28px;
-  background-position: -1px -1px;
-  -webkit-mask-image: linear-gradient(to bottom, #000 25%, transparent 92%);
-  mask-image: linear-gradient(to bottom, #000 25%, transparent 92%);
-}
-
-/* Recibo: folha com borda serrilhada embaixo */
-.receipt-sheet {
-  background: var(--surface);
-  border-radius: var(--r-lg) var(--r-lg) 0 0;
-}
-.receipt-wrap {
-  filter: drop-shadow(0 1px 1px rgb(16 20 28 / 0.08)) drop-shadow(0 14px 22px rgb(16 20 28 / 0.14));
-}
-@media (prefers-color-scheme: dark) {
   .receipt-wrap {
-    filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.5)) drop-shadow(0 14px 24px rgb(0 0 0 / 0.5));
+    filter: drop-shadow(0 1px 1px rgb(16 20 28 / 0.08)) drop-shadow(0 14px 22px rgb(16 20 28 / 0.14));
   }
-}
-.receipt-edge {
-  display: block;
-  width: 100%;
-  height: 10px;
-  color: var(--surface);
-}
+  @media (prefers-color-scheme: dark) {
+    .receipt-wrap {
+      filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.5)) drop-shadow(0 14px 24px rgb(0 0 0 / 0.5));
+    }
+  }
+  .receipt-edge {
+    display: block;
+    width: 100%;
+    height: 10px;
+    color: var(--surface);
+  }
 
-/* Carimbo (o unico momento orquestrado: confirmacao do pagamento) */
-@keyframes stamp-in {
-  0% {
-    opacity: 0;
-    transform: scale(1.7) rotate(-18deg);
+  /* Carimbo (o unico momento orquestrado: confirmacao do pagamento) */
+  @keyframes stamp-in {
+    0% {
+      opacity: 0;
+      transform: scale(1.7) rotate(-18deg);
+    }
+    35% {
+      opacity: 1;
+    }
+    100% {
+      opacity: 1;
+      transform: scale(1) rotate(-8deg);
+    }
   }
-  35% {
-    opacity: 1;
+  @keyframes stamp-ring {
+    from {
+      stroke-dashoffset: 1;
+    }
+    to {
+      stroke-dashoffset: 0;
+    }
   }
-  100% {
-    opacity: 1;
-    transform: scale(1) rotate(-8deg);
+  @keyframes stamp-check {
+    from {
+      stroke-dashoffset: 1;
+    }
+    to {
+      stroke-dashoffset: 0;
+    }
   }
-}
-@keyframes stamp-ring {
-  from {
-    stroke-dashoffset: 1;
+  @keyframes stamp-ripple {
+    from {
+      opacity: 0.45;
+      transform: scale(0.9);
+    }
+    to {
+      opacity: 0;
+      transform: scale(1.5);
+    }
   }
-  to {
+  .stamp {
+    transform: rotate(-8deg);
+    animation: stamp-in 620ms var(--spring) both;
+  }
+  .stamp-ring {
+    stroke-dasharray: 1;
     stroke-dashoffset: 0;
+    animation: stamp-ring 520ms var(--ease-out) 60ms both;
   }
-}
-@keyframes stamp-check {
-  from {
-    stroke-dashoffset: 1;
-  }
-  to {
+  .stamp-check {
+    stroke-dasharray: 1;
     stroke-dashoffset: 0;
+    animation: stamp-check 380ms var(--ease-out) 360ms both;
   }
-}
-@keyframes stamp-ripple {
-  from {
-    opacity: 0.45;
-    transform: scale(0.9);
+  .stamp-ripple {
+    animation: stamp-ripple 900ms var(--ease-out) 280ms both;
   }
-  to {
-    opacity: 0;
-    transform: scale(1.5);
-  }
-}
-.stamp {
-  transform: rotate(-8deg);
-  animation: stamp-in 620ms var(--spring) both;
-}
-.stamp-ring {
-  stroke-dasharray: 1;
-  stroke-dashoffset: 0;
-  animation: stamp-ring 520ms var(--ease-out) 60ms both;
-}
-.stamp-check {
-  stroke-dasharray: 1;
-  stroke-dashoffset: 0;
-  animation: stamp-check 380ms var(--ease-out) 360ms both;
-}
-.stamp-ripple {
-  animation: stamp-ripple 900ms var(--ease-out) 280ms both;
-}
 
-/* Resposta direta a acoes */
-@keyframes rise-in {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
+  /* Resposta direta a acoes */
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
   }
-  to {
-    opacity: 1;
-    transform: none;
+  .step-in {
+    animation: rise-in 240ms var(--ease-out) both;
   }
-}
-.step-in {
-  animation: rise-in 240ms var(--ease-out) both;
-}
-@keyframes pop {
-  0% {
-    transform: scale(0.6);
-    opacity: 0;
+  @keyframes pop {
+    0% {
+      transform: scale(0.6);
+      opacity: 0;
+    }
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
   }
-  100% {
-    transform: scale(1);
-    opacity: 1;
+  .pop {
+    animation: pop 320ms var(--spring) both;
   }
-}
-.pop {
-  animation: pop 320ms var(--spring) both;
-}
 
-/* Carregamento */
-@keyframes shimmer {
-  to {
-    background-position-x: -200%;
+  /* Carregamento */
+  @keyframes shimmer {
+    to {
+      background-position-x: -200%;
+    }
   }
-}
-.skeleton {
-  background: linear-gradient(100deg, var(--neutral-soft) 30%, color-mix(in srgb, var(--neutral-soft) 40%, var(--surface)) 50%, var(--neutral-soft) 70%);
-  background-size: 200% 100%;
-  animation: shimmer 1.4s linear infinite;
-  border-radius: 8px;
-}
-@keyframes pulse-dot {
-  0%,
-  100% {
-    opacity: 0.35;
-    transform: scale(0.85);
+  .skeleton {
+    background: linear-gradient(100deg, var(--neutral-soft) 30%, color-mix(in srgb, var(--neutral-soft) 40%, var(--surface)) 50%, var(--neutral-soft) 70%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s linear infinite;
+    border-radius: 8px;
   }
-  50% {
-    opacity: 1;
-    transform: scale(1);
+  @keyframes pulse-dot {
+    0%,
+    100% {
+      opacity: 0.35;
+      transform: scale(0.85);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1);
+    }
   }
-}
-.pulse-dot {
-  animation: pulse-dot 1.4s ease-in-out infinite;
+  .pulse-dot {
+    animation: pulse-dot 1.4s ease-in-out infinite;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
