@@ -6,6 +6,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy.engine import make_url
 
 DATABASE_URL_PREFIX = "postgresql+psycopg://"
+# Static on purpose: error messages must never echo any part of the URL (it holds the password).
+DATABASE_URL_HINT = (
+    f"expected {DATABASE_URL_PREFIX}USER:PASSWORD@HOST:PORT/DBNAME, "
+    "with special characters (@ : / ? #) percent-encoded in the password"
+)
+INVALID_DATABASE_URL_MESSAGE = f"DATABASE_URL is not valid: {DATABASE_URL_HINT}"
 
 
 class Settings(BaseSettings):
@@ -36,11 +42,16 @@ class Settings(BaseSettings):
         if not url.startswith(DATABASE_URL_PREFIX):
             raise ValueError(f"DATABASE_URL must start with {DATABASE_URL_PREFIX}")
         try:
-            make_url(url)
+            parsed = make_url(url)
         except Exception:
             # SQLAlchemy parse errors can quote part of the URL (e.g. the password read as a
             # port), so drop the original exception and report a fixed message.
-            raise ValueError("DATABASE_URL is not a valid database URL") from None
+            raise ValueError(INVALID_DATABASE_URL_MESSAGE) from None
+        host = parsed.host or ""
+        if "@" in host or any(char.isspace() for char in host):
+            # An unescaped "@" in the password makes SQLAlchemy read part of the password as
+            # the host, and the driver's DNS error would then print it in the logs.
+            raise ValueError(INVALID_DATABASE_URL_MESSAGE)
         return value
 
     @property

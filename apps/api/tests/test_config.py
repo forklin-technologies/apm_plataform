@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
+from sqlalchemy.engine import make_url
 
 from app.core.config import Settings, get_settings
 
@@ -74,3 +75,15 @@ def test_get_settings_fails_fast_when_environment_is_empty(
 
     with pytest.raises(ValidationError):
         get_settings()
+
+
+def test_accepts_percent_encoded_special_characters_in_password(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ENV", "development")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://apm:Wq8Zk%403Xp9Lm@db:5432/apm")
+
+    settings = Settings(_env_file=None)  # type: ignore[call-arg]
+
+    password = make_url(settings.database_url.get_secret_value()).password
+    assert password == "Wq8Zk@3Xp9Lm"  # noqa: S105  (fake password)
