@@ -90,7 +90,6 @@ export function AmountStep({
   return (
     <form
       noValidate
-      className="step-in"
       onSubmit={(e) => {
         e.preventDefault();
         onContinue();

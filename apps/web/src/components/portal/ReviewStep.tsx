@@ -57,7 +57,7 @@ export function ReviewStep({
 }: ReviewStepProps) {
   const filled = IDENTIFICATION_FIELDS.filter((field) => identification[field]);
   return (
-    <div className="step-in">
+    <div>
       <h2 ref={headingRef} tabIndex={-1} className="text-title text-ink outline-none">
         Confira antes de pagar
       </h2>

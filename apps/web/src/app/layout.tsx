@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { connection } from "next/server";
+import { MotionGate } from "@/components/ui/MotionGate";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -31,6 +32,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         >
           Ir para o conteúdo
         </a>
+        <MotionGate />
         {children}
       </body>
     </html>

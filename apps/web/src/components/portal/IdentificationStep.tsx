@@ -57,7 +57,6 @@ export function IdentificationStep({
     <form
       ref={formRef}
       noValidate
-      className="step-in"
       onSubmit={(e) => {
         e.preventDefault();
         onContinue(focusField);

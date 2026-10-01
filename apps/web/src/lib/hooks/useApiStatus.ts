@@ -9,6 +9,8 @@ export type ApiStatus =
   | { state: "ready" }
   | { state: "unavailable"; reason: "not-ready" | "unreachable" };
 
+const HIDDEN_MIN_MS = 60_000;
+
 export interface UseApiStatusOptions {
   check?: () => Promise<ReadinessResult>;
   /** Intervalo quando a API esta no ar. */
@@ -20,7 +22,7 @@ export interface UseApiStatusOptions {
 
 /**
  * Consulta GET /api/health/ready em intervalo moderado.
- * - pausa com a aba oculta e retoma (consultando na hora) quando volta;
+ * - com a aba oculta consulta no maximo a cada 60 s e, ao voltar a ficar visivel, consulta na hora;
  * - com a API fora, espaca as consultas (backoff) para nao inundar rede nem console;
  * - nunca lanca: qualquer falha vira "unavailable".
  */
@@ -45,10 +47,12 @@ export function useApiStatus(options: UseApiStatusOptions = {}): ApiStatus & { r
     let failures = 0;
     let inFlight = false;
 
+    // Documento oculto (aba em segundo plano, portal do Maestri): consulta mais devagar, nunca para.
+    // Parar deixaria o chip congelado num estado velho para quem ainda esta olhando a tela.
     const schedule = (ms: number) => {
       clearTimeout(timer);
-      if (cancelled || document.visibilityState === "hidden") return;
-      timer = setTimeout(run, ms);
+      if (cancelled) return;
+      timer = setTimeout(run, document.visibilityState === "hidden" ? Math.max(ms, HIDDEN_MIN_MS) : ms);
     };
 
     async function run() {
@@ -80,7 +84,6 @@ export function useApiStatus(options: UseApiStatusOptions = {}): ApiStatus & { r
 
     const onVisibility = () => {
       if (document.visibilityState === "visible") void run();
-      else clearTimeout(timer);
     };
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("online", onVisibility);

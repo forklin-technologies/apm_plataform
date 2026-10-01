@@ -44,7 +44,7 @@ export function ReceiptView({ slug, token, initial }: { slug: string; token: str
 
   if (view.kind === "unconfirmed") {
     return (
-      <div className="step-in max-w-xl">
+      <div className="max-w-xl">
         <h1 className="text-title text-ink">Este pagamento ainda não foi confirmado</h1>
         <p className="mt-3 text-body text-ink-2">
           O comprovante só existe depois que o banco confirma o Pix. Se você acabou de pagar, aguarde um instante e abra
@@ -60,7 +60,7 @@ export function ReceiptView({ slug, token, initial }: { slug: string; token: str
   const confirmed = view.receipt.status === "PAID";
   return (
     <div className="grid gap-10 lg:grid-cols-[minmax(0,26rem)_minmax(0,1fr)] lg:items-start lg:gap-16">
-      <div className="step-in mx-auto w-full max-w-[26rem] lg:mx-0">
+      <div className="mx-auto w-full max-w-[26rem] lg:mx-0">
         <ReceiptCard receipt={view.receipt} />
       </div>
       <div className="max-w-xl">

@@ -135,7 +135,7 @@ export function PixPayment({ slug, charge: initial, onNewCharge, onRestart, fetc
 
   const timeUp = remaining <= 0;
   return (
-    <div className="step-in">
+    <div>
       <div className="rounded-[var(--r-lg)] bg-surface p-5 shadow-[0_0_0_1px_var(--line)] sm:p-8">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
           <h2 ref={headingRef} tabIndex={-1} className="text-heading text-ink outline-none">

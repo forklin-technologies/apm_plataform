@@ -25,7 +25,13 @@ export function ContributionFlow({ school }: { school: PublicSchool }) {
   const fields = visibleFields(school.identification);
   const steps: Step[] = fields.length > 0 ? ["amount", "identification", "review", "pix"] : ["amount", "review", "pix"];
 
-  const [step, setStep] = useState<Step>("amount");
+  const [step, setStepState] = useState<Step>("amount");
+  // A entrada animada so acontece depois de uma acao do usuario (nunca no carregamento da pagina).
+  const [navigated, setNavigated] = useState(false);
+  const setStep = (next: Step) => {
+    setNavigated(true);
+    setStepState(next);
+  };
   const [choice, setChoice] = useState<string | null>(null);
   const [customCents, setCustomCents] = useState(0);
   const [amountError, setAmountError] = useState<string | null>(null);
@@ -133,62 +139,64 @@ export function ContributionFlow({ school }: { school: PublicSchool }) {
         <div className="min-w-0">
           <StepProgress steps={steps} current={step} />
 
-          {step === "amount" && (
-            <AmountStep
-              school={school}
-              choice={choice}
-              customCents={customCents}
-              error={amountError}
-              headingRef={headingRef}
-              onChoice={onChoice}
-              onCustomChange={(cents) => {
-                setCustomCents(cents);
-                setAmountError(null);
-              }}
-              onContinue={continueFromAmount}
-            />
-          )}
+          <div key={step} className={navigated ? "step-in" : undefined}>
+            {step === "amount" && (
+              <AmountStep
+                school={school}
+                choice={choice}
+                customCents={customCents}
+                error={amountError}
+                headingRef={headingRef}
+                onChoice={onChoice}
+                onCustomChange={(cents) => {
+                  setCustomCents(cents);
+                  setAmountError(null);
+                }}
+                onContinue={continueFromAmount}
+              />
+            )}
 
-          {step === "identification" && (
-            <IdentificationStep
-              school={school}
-              values={values}
-              errors={errors}
-              headingRef={headingRef}
-              onChange={(field, value) => {
-                setValues((prev) => ({ ...prev, [field]: value }));
-                setErrors((prev) => ({ ...prev, [field]: undefined }));
-              }}
-              onBack={() => setStep("amount")}
-              onContinue={continueFromIdentification}
-            />
-          )}
+            {step === "identification" && (
+              <IdentificationStep
+                school={school}
+                values={values}
+                errors={errors}
+                headingRef={headingRef}
+                onChange={(field, value) => {
+                  setValues((prev) => ({ ...prev, [field]: value }));
+                  setErrors((prev) => ({ ...prev, [field]: undefined }));
+                }}
+                onBack={() => setStep("amount")}
+                onContinue={continueFromIdentification}
+              />
+            )}
 
-          {step === "review" && amountCents !== null && description !== null && (
-            <ReviewStep
-              schoolName={school.name}
-              description={description}
-              amountCents={amountCents}
-              identification={values}
-              submitting={submitting}
-              error={submitError}
-              headingRef={headingRef}
-              onEditAmount={() => setStep("amount")}
-              onEditIdentification={fields.length > 0 ? () => setStep("identification") : null}
-              onBack={() => setStep(fields.length > 0 ? "identification" : "amount")}
-              onSubmit={createCharge}
-            />
-          )}
+            {step === "review" && amountCents !== null && description !== null && (
+              <ReviewStep
+                schoolName={school.name}
+                description={description}
+                amountCents={amountCents}
+                identification={values}
+                submitting={submitting}
+                error={submitError}
+                headingRef={headingRef}
+                onEditAmount={() => setStep("amount")}
+                onEditIdentification={fields.length > 0 ? () => setStep("identification") : null}
+                onBack={() => setStep(fields.length > 0 ? "identification" : "amount")}
+                onSubmit={createCharge}
+              />
+            )}
 
-          {step === "pix" && charge && (
-            <PixPayment
-              key={charge.token}
-              slug={school.slug}
-              charge={charge}
-              onNewCharge={createCharge}
-              onRestart={restart}
-            />
-          )}
+            {step === "pix" && charge && (
+              <PixPayment
+                key={charge.token}
+                slug={school.slug}
+                charge={charge}
+                onNewCharge={createCharge}
+                onRestart={restart}
+              />
+            )}
+          </div>
         </div>
 
         <div className="hidden lg:sticky lg:top-24 lg:block">
