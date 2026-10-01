@@ -34,12 +34,14 @@ If `ENV` or `DATABASE_URL` is missing, the API refuses to start.
 Docker (repository root):
 
 ```bash
-docker compose up -d --build     # starts db and api, waits for both to be healthy
-docker compose ps                # both should say "healthy"
+docker compose up -d --build --wait   # returns once db and api are both healthy
+docker compose ps                        # both should say "healthy"
 curl -i http://127.0.0.1:8001/api/health         # 200 {"status":"ok"}
 curl -i http://127.0.0.1:8001/api/health/ready   # 200 {"status":"ready"}; 503 when the database is down
 curl -s http://127.0.0.1:8001/api/openapi.json | head -c 200
 ```
+
+Without `--wait`, `docker compose up -d --build` only waits for `db`: it returns while `api` is still `starting`, so run `docker compose ps` until it says `healthy`.
 
 Interactive docs (not in `production`): <http://127.0.0.1:8001/api/docs>.
 
