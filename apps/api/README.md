@@ -17,7 +17,11 @@ From the repository root:
 cp .env.example .env
 ```
 
-`.env` is git-ignored. The values in `.env.example` are development placeholders, not secrets. Change `POSTGRES_PASSWORD` (and the password inside `DATABASE_URL`) if you want your own; keep it URL-safe.
+`.env` is git-ignored. The values in `.env.example` are development placeholders, not secrets. If you set your own `POSTGRES_PASSWORD` (also change the password inside `DATABASE_URL`):
+
+- **It must be URL-safe: no `@ : / ? #` and no whitespace.** Compose embeds it, unescaped, in the API's `DATABASE_URL`. An unescaped `@` makes the URL parse part of the password as the host, so the API **refuses to start** when it detects a URL it cannot read safely (the error message never prints the value) instead of leaking it in connection errors.
+- Generate a safe one with `openssl rand -hex 24`.
+- On the host (uv) variant you may use special characters in `DATABASE_URL` if you percent-encode them (`@` becomes `%40`). Compose does not encode, so keep the compose password URL-safe.
 
 | Variable | Used by | Notes |
 | --- | --- | --- |
