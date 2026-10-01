@@ -49,7 +49,7 @@ export function SummaryCard({
     >
       <p className="text-sub text-ink-2">Sua contribuição para</p>
       <p className="text-headline text-ink">{schoolName}</p>
-      <p className="mt-5 text-[2.25rem] font-bold leading-none tracking-[-0.035em] tabular-nums text-ink">
+      <p className="mt-5 text-[2.25rem] font-bold leading-none tracking-[-0.035em] text-ink">
         {amountCents === null ? "R$ —" : formatBRL(amountCents)}
       </p>
       <p className="mt-1.5 min-h-5 text-sub text-ink-2">{description ?? "Escolha o valor para começar."}</p>

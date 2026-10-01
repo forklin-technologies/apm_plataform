@@ -30,6 +30,10 @@
 
   --focus: #0a62d6;
 
+  /* Series do grafico (paleta categorica validada: azul = entradas, laranja = saidas) */
+  --series-in: #2a78d6;
+  --series-out: #eb6834;
+
   --accent: #16181d;
   --accent-contrast: #ffffff;
   --accent-ink: var(--ink);
@@ -76,6 +80,9 @@
     --neutral-soft: rgb(255 255 255 / 0.09);
 
     --focus: #7db0ff;
+
+    --series-in: #3987e5;
+    --series-out: #d95926;
 
     --accent: #f1f3f6;
     --accent-contrast: #0f1115;

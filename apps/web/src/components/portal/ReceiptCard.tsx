@@ -93,7 +93,7 @@ export function ReceiptCard({ receipt, headingLevel = 2 }: { receipt: Receipt; h
           <div className="my-5 border-t border-dashed border-line" aria-hidden="true" />
 
           <p className="text-foot text-ink-2">Valor</p>
-          <p className="mt-1 text-[2.5rem] font-bold leading-none tracking-[-0.04em] tabular-nums text-ink">
+          <p className="mt-1 text-[2.5rem] font-bold leading-none tracking-[-0.04em] text-ink">
             {formatBRL(receipt.amountCents)}
           </p>
 

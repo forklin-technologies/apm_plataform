@@ -23,8 +23,12 @@ const timeFormat = new Intl.DateTimeFormat("pt-BR", {
   minute: "2-digit",
 });
 
+/** "30 set": dia e mes abreviado, sem "de" nem ponto. */
 export function formatDateShort(iso: string): string {
-  return dateFormat.format(new Date(iso)).replace(".", "");
+  const parts = dateFormat.formatToParts(new Date(iso));
+  const day = parts.find((p) => p.type === "day")?.value ?? "";
+  const month = (parts.find((p) => p.type === "month")?.value ?? "").replace(".", "");
+  return `${day} ${month}`;
 }
 
 export function formatDateLong(iso: string): string {

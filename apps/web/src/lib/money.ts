@@ -56,3 +56,10 @@ export function centsFromDigits(raw: string): Cents {
   if (digits === "") return 0;
   return Math.min(Number(digits.slice(0, 12)), MAX_INPUT_CENTS);
 }
+
+/** "R$ 2.000" (sem centavos): rotulos de eixo de grafico. So exibicao; o valor segue em centavos. */
+export function formatBRLWhole(cents: Cents): string {
+  if (!isCents(cents)) throw new TypeError("Valor monetario deve ser inteiro em centavos.");
+  const reais = Math.round(Math.abs(cents) / 100);
+  return `${cents < 0 ? "-" : ""}R$${NBSP}${groupThousands(String(reais))}`;
+}
