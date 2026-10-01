@@ -79,6 +79,11 @@ export function AmountStep({
 
   const { minCents, maxCents } = school.customAmount;
   const customSelected = choice === CUSTOM_CHOICE;
+
+  // Erro de valor livre: o foco vai para o campo (leitores de tela leem o erro via aria-describedby).
+  useEffect(() => {
+    if (error && customSelected) customRef.current?.focus();
+  }, [error, customSelected]);
   const groupError = !customSelected ? error : null;
   const customError = customSelected ? error : null;
 

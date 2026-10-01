@@ -168,6 +168,8 @@
 
 @layer base {
   html {
+    /* O foco/rolagem nao pode parar atras das barras fixas (topo e acoes/abas embaixo). */
+    scroll-padding-block: 5rem 7rem;
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
     -webkit-tap-highlight-color: transparent;

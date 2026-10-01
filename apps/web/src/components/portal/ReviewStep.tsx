@@ -23,10 +23,10 @@ interface ReviewStepProps {
 
 function Row({ label, value, onEdit, editLabel }: { label: string; value: string; onEdit?: (() => void) | null; editLabel?: string }) {
   return (
-    <div className="flex items-center justify-between gap-3 px-5 py-3">
+    <li className="flex items-center justify-between gap-3 px-5 py-3">
       <div className="min-w-0">
-        <dt className="text-foot text-ink-2">{label}</dt>
-        <dd className="text-body font-medium text-ink [overflow-wrap:anywhere]">{value}</dd>
+        <span className="block text-foot text-ink-2">{label}</span>
+        <span className="block text-body font-medium text-ink [overflow-wrap:anywhere]">{value}</span>
       </div>
       {onEdit && (
         <button
@@ -38,7 +38,7 @@ function Row({ label, value, onEdit, editLabel }: { label: string; value: string
           Alterar
         </button>
       )}
-    </div>
+    </li>
   );
 }
 
@@ -65,7 +65,7 @@ export function ReviewStep({
         Se estiver tudo certo, vamos gerar o Pix. Você só paga depois de abrir o app do seu banco.
       </p>
 
-      <dl className="mt-6 divide-y divide-line overflow-hidden rounded-[var(--r-lg)] bg-surface shadow-[0_0_0_1px_var(--line)]">
+      <ul aria-label="Resumo da contribuição" className="mt-6 divide-y divide-line overflow-hidden rounded-[var(--r-lg)] bg-surface shadow-[0_0_0_1px_var(--line)]">
         <Row label="Escola" value={schoolName} />
         <Row label="Contribuição" value={description} onEdit={onEditAmount} editLabel="Alterar o valor" />
         <Row label="Valor" value={formatBRL(amountCents)} />
@@ -78,7 +78,7 @@ export function ReviewStep({
             editLabel={`Alterar ${FIELD_LABELS[field].toLowerCase()}`}
           />
         ))}
-      </dl>
+      </ul>
 
       <p className="mt-4 flex items-start gap-2.5 text-sub text-ink-2">
         <LockIcon size={18} className="mt-0.5 shrink-0" />

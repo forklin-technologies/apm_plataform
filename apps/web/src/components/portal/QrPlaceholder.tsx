@@ -54,7 +54,7 @@ export function QrPlaceholder({ payload }: { payload: string }) {
       >
         <path d={cells.join("")} fill="#14171c" />
       </svg>
-      <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 -rotate-6 rounded-full bg-warn-soft px-4 py-2 text-sub font-bold text-warn shadow-[0_0_0_4px_#fff]">
+      <span className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 -rotate-6 rounded-full bg-[#fdeed6] px-4 py-2 text-sub font-bold text-[#8a4b00] shadow-[0_0_0_4px_#fff]">
         Exemplo, não pague
       </span>
     </div>
