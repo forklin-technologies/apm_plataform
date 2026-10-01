@@ -1,0 +1,11 @@
+node_modules
+.next
+.env
+*.p12
+*.pfx
+*.pem
+*.key
+
+.DS_Store
+*.tsbuildinfo
+.maestri/

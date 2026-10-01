@@ -1,0 +1,25 @@
+# Site público e painel
+apm.seudominio.com.br {
+	encode gzip
+	reverse_proxy app:3000 {
+		header_up X-Real-IP {remote_host}
+	}
+}
+
+# Webhook do banco: exige certificado de cliente (mTLS)
+webhook.apm.seudominio.com.br {
+	tls {
+		client_auth {
+			mode require_and_verify
+			# Cadeia de certificados fornecida pelo Banco do Brasil
+			trust_pool file /etc/caddy/bb-webhook-ca.pem
+		}
+	}
+	@webhook path /api/webhooks/pix/*
+	handle @webhook {
+		reverse_proxy app:3000 {
+			header_up X-Real-IP {remote_host}
+		}
+	}
+	respond 404
+}

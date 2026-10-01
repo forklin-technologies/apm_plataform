@@ -1,0 +1,1939 @@
+{
+  "id": "59dd3127-bfc4-4c8d-8d40-3d71f25b213b",
+  "prevId": "00000000-0000-0000-0000-000000000000",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {
+    "public.campanhas": {
+      "name": "campanhas",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "escola_id": {
+          "name": "escola_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "slug": {
+          "name": "slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nome": {
+          "name": "nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "descricao": {
+          "name": "descricao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "texto_apresentacao": {
+          "name": "texto_apresentacao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "imagem_url": {
+          "name": "imagem_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "data_inicio": {
+          "name": "data_inicio",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "data_fim": {
+          "name": "data_fim",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "status_campanha",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'RASCUNHO'"
+        },
+        "meta_centavos": {
+          "name": "meta_centavos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "valor_minimo_centavos": {
+          "name": "valor_minimo_centavos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ordem": {
+          "name": "ordem",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "campanhas_escola_slug": {
+          "name": "campanhas_escola_slug",
+          "columns": [
+            {
+              "expression": "escola_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "slug",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "campanhas_escola_id_escolas_id_fk": {
+          "name": "campanhas_escola_id_escolas_id_fk",
+          "tableFrom": "campanhas",
+          "tableTo": "escolas",
+          "columnsFrom": [
+            "escola_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.credenciais_pix": {
+      "name": "credenciais_pix",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "escola_id": {
+          "name": "escola_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provedor": {
+          "name": "provedor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ambiente": {
+          "name": "ambiente",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "chave_pix": {
+          "name": "chave_pix",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "client_id_cifrado": {
+          "name": "client_id_cifrado",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "client_secret_cifrado": {
+          "name": "client_secret_cifrado",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "app_key_cifrada": {
+          "name": "app_key_cifrada",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "certificado_cifrado": {
+          "name": "certificado_cifrado",
+          "type": "bytea",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "senha_certificado_cifrada": {
+          "name": "senha_certificado_cifrada",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "segredo_webhook": {
+          "name": "segredo_webhook",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "webhook_registrado_em": {
+          "name": "webhook_registrado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "atualizado_em": {
+          "name": "atualizado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "credenciais_pix_escola_id_escolas_id_fk": {
+          "name": "credenciais_pix_escola_id_escolas_id_fk",
+          "tableFrom": "credenciais_pix",
+          "tableTo": "escolas",
+          "columnsFrom": [
+            "escola_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "credenciais_pix_escola_id_unique": {
+          "name": "credenciais_pix_escola_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "escola_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.escolas": {
+      "name": "escolas",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "slug": {
+          "name": "slug",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nome": {
+          "name": "nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nome_apm": {
+          "name": "nome_apm",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "cnpj_apm": {
+          "name": "cnpj_apm",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "logo_url": {
+          "name": "logo_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "endereco": {
+          "name": "endereco",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "telefone": {
+          "name": "telefone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "cor_primaria": {
+          "name": "cor_primaria",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'#E6457A'"
+        },
+        "cor_secundaria": {
+          "name": "cor_secundaria",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'#3BA7E0'"
+        },
+        "mensagem_inicial": {
+          "name": "mensagem_inicial",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "mensagem_agradecimento": {
+          "name": "mensagem_agradecimento",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "modo_identificacao": {
+          "name": "modo_identificacao",
+          "type": "modo_identificacao",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'IDENTIFICADA'"
+        },
+        "campos_formulario": {
+          "name": "campos_formulario",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor_minimo_livre_centavos": {
+          "name": "valor_minimo_livre_centavos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 500
+        },
+        "valor_maximo_livre_centavos": {
+          "name": "valor_maximo_livre_centavos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 100000
+        },
+        "expiracao_pix_segundos": {
+          "name": "expiracao_pix_segundos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1800
+        },
+        "proximo_numero_pedido": {
+          "name": "proximo_numero_pedido",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 1
+        },
+        "ativa": {
+          "name": "ativa",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "escolas_slug_unique": {
+          "name": "escolas_slug_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "slug"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.eventos_webhook": {
+      "name": "eventos_webhook",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "escola_id": {
+          "name": "escola_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "provedor": {
+          "name": "provedor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "recebido_em": {
+          "name": "recebido_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "ip": {
+          "name": "ip",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "corpo": {
+          "name": "corpo",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "valido": {
+          "name": "valido",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "processado_em": {
+          "name": "processado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "erro": {
+          "name": "erro",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "eventos_webhook_escola_id_escolas_id_fk": {
+          "name": "eventos_webhook_escola_id_escolas_id_fk",
+          "tableFrom": "eventos_webhook",
+          "tableTo": "escolas",
+          "columnsFrom": [
+            "escola_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.itens": {
+      "name": "itens",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "escola_id": {
+          "name": "escola_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "campanha_id": {
+          "name": "campanha_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "tipo_item",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nome": {
+          "name": "nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "descricao": {
+          "name": "descricao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "imagem_url": {
+          "name": "imagem_url",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "preco_centavos": {
+          "name": "preco_centavos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "controla_estoque": {
+          "name": "controla_estoque",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "estoque_total": {
+          "name": "estoque_total",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "estoque_reservado": {
+          "name": "estoque_reservado",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "estoque_vendido": {
+          "name": "estoque_vendido",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "limite_por_pedido": {
+          "name": "limite_por_pedido",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "inicio_venda": {
+          "name": "inicio_venda",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "fim_venda": {
+          "name": "fim_venda",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ativo": {
+          "name": "ativo",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "ordem": {
+          "name": "ordem",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "itens_escola_campanha": {
+          "name": "itens_escola_campanha",
+          "columns": [
+            {
+              "expression": "escola_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "campanha_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "itens_escola_id_escolas_id_fk": {
+          "name": "itens_escola_id_escolas_id_fk",
+          "tableFrom": "itens",
+          "tableTo": "escolas",
+          "columnsFrom": [
+            "escola_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "itens_campanha_id_campanhas_id_fk": {
+          "name": "itens_campanha_id_campanhas_id_fk",
+          "tableFrom": "itens",
+          "tableTo": "campanhas",
+          "columnsFrom": [
+            "campanha_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "preco_coerente": {
+          "name": "preco_coerente",
+          "value": "(\"itens\".\"tipo\" = 'VALOR_LIVRE') = (\"itens\".\"preco_centavos\" IS NULL)"
+        },
+        "preco_positivo": {
+          "name": "preco_positivo",
+          "value": "\"itens\".\"preco_centavos\" IS NULL OR \"itens\".\"preco_centavos\" > 0"
+        },
+        "estoque_nao_negativo": {
+          "name": "estoque_nao_negativo",
+          "value": "\"itens\".\"estoque_reservado\" >= 0 AND \"itens\".\"estoque_vendido\" >= 0"
+        },
+        "estoque_coerente": {
+          "name": "estoque_coerente",
+          "value": "NOT \"itens\".\"controla_estoque\" OR \"itens\".\"estoque_total\" IS NOT NULL"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.itens_pedido": {
+      "name": "itens_pedido",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "escola_id": {
+          "name": "escola_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pedido_id": {
+          "name": "pedido_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "item_id": {
+          "name": "item_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "campanha_id": {
+          "name": "campanha_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "tipo": {
+          "name": "tipo",
+          "type": "tipo_item",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "descricao": {
+          "name": "descricao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "mes_referencia": {
+          "name": "mes_referencia",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "quantidade": {
+          "name": "quantidade",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor_unitario_centavos": {
+          "name": "valor_unitario_centavos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor_total_centavos": {
+          "name": "valor_total_centavos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {
+        "itens_pedido_pedido": {
+          "name": "itens_pedido_pedido",
+          "columns": [
+            {
+              "expression": "pedido_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "itens_pedido_escola_id_escolas_id_fk": {
+          "name": "itens_pedido_escola_id_escolas_id_fk",
+          "tableFrom": "itens_pedido",
+          "tableTo": "escolas",
+          "columnsFrom": [
+            "escola_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "itens_pedido_pedido_id_pedidos_id_fk": {
+          "name": "itens_pedido_pedido_id_pedidos_id_fk",
+          "tableFrom": "itens_pedido",
+          "tableTo": "pedidos",
+          "columnsFrom": [
+            "pedido_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "itens_pedido_item_id_itens_id_fk": {
+          "name": "itens_pedido_item_id_itens_id_fk",
+          "tableFrom": "itens_pedido",
+          "tableTo": "itens",
+          "columnsFrom": [
+            "item_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "itens_pedido_campanha_id_campanhas_id_fk": {
+          "name": "itens_pedido_campanha_id_campanhas_id_fk",
+          "tableFrom": "itens_pedido",
+          "tableTo": "campanhas",
+          "columnsFrom": [
+            "campanha_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {
+        "quantidade_positiva": {
+          "name": "quantidade_positiva",
+          "value": "\"itens_pedido\".\"quantidade\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.logs_auditoria": {
+      "name": "logs_auditoria",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "escola_id": {
+          "name": "escola_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "usuario_id": {
+          "name": "usuario_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "acao": {
+          "name": "acao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entidade": {
+          "name": "entidade",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "entidade_id": {
+          "name": "entidade_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "antes": {
+          "name": "antes",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "depois": {
+          "name": "depois",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ip": {
+          "name": "ip",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "logs_escola_data": {
+          "name": "logs_escola_data",
+          "columns": [
+            {
+              "expression": "escola_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "criado_em",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "logs_auditoria_escola_id_escolas_id_fk": {
+          "name": "logs_auditoria_escola_id_escolas_id_fk",
+          "tableFrom": "logs_auditoria",
+          "tableTo": "escolas",
+          "columnsFrom": [
+            "escola_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "logs_auditoria_usuario_id_usuarios_id_fk": {
+          "name": "logs_auditoria_usuario_id_usuarios_id_fk",
+          "tableFrom": "logs_auditoria",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "usuario_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.notificacoes": {
+      "name": "notificacoes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "escola_id": {
+          "name": "escola_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "evento": {
+          "name": "evento",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "canal": {
+          "name": "canal",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "destino": {
+          "name": "destino",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "payload": {
+          "name": "payload",
+          "type": "jsonb",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'PENDENTE'"
+        },
+        "tentativas": {
+          "name": "tentativas",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "notificacoes_escola_id_escolas_id_fk": {
+          "name": "notificacoes_escola_id_escolas_id_fk",
+          "tableFrom": "notificacoes",
+          "tableTo": "escolas",
+          "columnsFrom": [
+            "escola_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.pagamentos": {
+      "name": "pagamentos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "escola_id": {
+          "name": "escola_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pedido_id": {
+          "name": "pedido_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "provedor": {
+          "name": "provedor",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "txid": {
+          "name": "txid",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "end_to_end_id": {
+          "name": "end_to_end_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "valor_centavos": {
+          "name": "valor_centavos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor_pago_centavos": {
+          "name": "valor_pago_centavos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pix_copia_e_cola": {
+          "name": "pix_copia_e_cola",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "status": {
+          "name": "status",
+          "type": "status_pagamento",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'CRIADO'"
+        },
+        "pagador_nome_cifrado": {
+          "name": "pagador_nome_cifrado",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "erro": {
+          "name": "erro",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expira_em": {
+          "name": "expira_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pago_em": {
+          "name": "pago_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "pagamentos_pedido": {
+          "name": "pagamentos_pedido",
+          "columns": [
+            {
+              "expression": "pedido_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "pagamentos_escola_id_escolas_id_fk": {
+          "name": "pagamentos_escola_id_escolas_id_fk",
+          "tableFrom": "pagamentos",
+          "tableTo": "escolas",
+          "columnsFrom": [
+            "escola_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "pagamentos_pedido_id_pedidos_id_fk": {
+          "name": "pagamentos_pedido_id_pedidos_id_fk",
+          "tableFrom": "pagamentos",
+          "tableTo": "pedidos",
+          "columnsFrom": [
+            "pedido_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "pagamentos_txid_unique": {
+          "name": "pagamentos_txid_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "txid"
+          ]
+        },
+        "pagamentos_end_to_end_id_unique": {
+          "name": "pagamentos_end_to_end_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "end_to_end_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.pedidos": {
+      "name": "pedidos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "escola_id": {
+          "name": "escola_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "codigo": {
+          "name": "codigo",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "token_acesso": {
+          "name": "token_acesso",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "responsavel_nome": {
+          "name": "responsavel_nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "responsavel_email": {
+          "name": "responsavel_email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "responsavel_telefone": {
+          "name": "responsavel_telefone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "aluno_nome": {
+          "name": "aluno_nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "turma_id": {
+          "name": "turma_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "observacao": {
+          "name": "observacao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "anonimo": {
+          "name": "anonimo",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "total_centavos": {
+          "name": "total_centavos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "status": {
+          "name": "status",
+          "type": "status_pedido",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'AGUARDANDO_PAGAMENTO'"
+        },
+        "status_entrega": {
+          "name": "status_entrega",
+          "type": "status_entrega",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'NAO_SE_APLICA'"
+        },
+        "forma_pagamento": {
+          "name": "forma_pagamento",
+          "type": "forma_pagamento",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "'PIX'"
+        },
+        "estoque_liberado": {
+          "name": "estoque_liberado",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "requer_revisao": {
+          "name": "requer_revisao",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
+        "motivo_revisao": {
+          "name": "motivo_revisao",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "expira_em": {
+          "name": "expira_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "pago_em": {
+          "name": "pago_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "lancado_por_id": {
+          "name": "lancado_por_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {
+        "pedidos_escola_codigo": {
+          "name": "pedidos_escola_codigo",
+          "columns": [
+            {
+              "expression": "escola_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "codigo",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "pedidos_escola_status_data": {
+          "name": "pedidos_escola_status_data",
+          "columns": [
+            {
+              "expression": "escola_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "criado_em",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "pedidos_escola_id_escolas_id_fk": {
+          "name": "pedidos_escola_id_escolas_id_fk",
+          "tableFrom": "pedidos",
+          "tableTo": "escolas",
+          "columnsFrom": [
+            "escola_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "pedidos_turma_id_turmas_id_fk": {
+          "name": "pedidos_turma_id_turmas_id_fk",
+          "tableFrom": "pedidos",
+          "tableTo": "turmas",
+          "columnsFrom": [
+            "turma_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "pedidos_lancado_por_id_usuarios_id_fk": {
+          "name": "pedidos_lancado_por_id_usuarios_id_fk",
+          "tableFrom": "pedidos",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "lancado_por_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "pedidos_token_acesso_unique": {
+          "name": "pedidos_token_acesso_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "token_acesso"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "total_positivo": {
+          "name": "total_positivo",
+          "value": "\"pedidos\".\"total_centavos\" > 0"
+        }
+      },
+      "isRLSEnabled": false
+    },
+    "public.pix_avulsos": {
+      "name": "pix_avulsos",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "escola_id": {
+          "name": "escola_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "end_to_end_id": {
+          "name": "end_to_end_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "valor_centavos": {
+          "name": "valor_centavos",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "horario": {
+          "name": "horario",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "info_pagador": {
+          "name": "info_pagador",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "pedido_id": {
+          "name": "pedido_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "pix_avulsos_escola_id_escolas_id_fk": {
+          "name": "pix_avulsos_escola_id_escolas_id_fk",
+          "tableFrom": "pix_avulsos",
+          "tableTo": "escolas",
+          "columnsFrom": [
+            "escola_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "pix_avulsos_pedido_id_pedidos_id_fk": {
+          "name": "pix_avulsos_pedido_id_pedidos_id_fk",
+          "tableFrom": "pix_avulsos",
+          "tableTo": "pedidos",
+          "columnsFrom": [
+            "pedido_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "pix_avulsos_end_to_end_id_unique": {
+          "name": "pix_avulsos_end_to_end_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "end_to_end_id"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.sessoes": {
+      "name": "sessoes",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "usuario_id": {
+          "name": "usuario_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "expira_em": {
+          "name": "expira_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ultimo_uso": {
+          "name": "ultimo_uso",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        },
+        "ip": {
+          "name": "ip",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "user_agent": {
+          "name": "user_agent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "sessoes_usuario_id_usuarios_id_fk": {
+          "name": "sessoes_usuario_id_usuarios_id_fk",
+          "tableFrom": "sessoes",
+          "tableTo": "usuarios",
+          "columnsFrom": [
+            "usuario_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.turmas": {
+      "name": "turmas",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "escola_id": {
+          "name": "escola_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "nome": {
+          "name": "nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ordem": {
+          "name": "ordem",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "ativa": {
+          "name": "ativa",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        }
+      },
+      "indexes": {
+        "turmas_escola_nome": {
+          "name": "turmas_escola_nome",
+          "columns": [
+            {
+              "expression": "escola_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "nome",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
+      "foreignKeys": {
+        "turmas_escola_id_escolas_id_fk": {
+          "name": "turmas_escola_id_escolas_id_fk",
+          "tableFrom": "turmas",
+          "tableTo": "escolas",
+          "columnsFrom": [
+            "escola_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
+      "isRLSEnabled": false
+    },
+    "public.usuarios": {
+      "name": "usuarios",
+      "schema": "",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "uuid",
+          "primaryKey": true,
+          "notNull": true,
+          "default": "gen_random_uuid()"
+        },
+        "escola_id": {
+          "name": "escola_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "nome": {
+          "name": "nome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "email": {
+          "name": "email",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "senha_hash": {
+          "name": "senha_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "perfil": {
+          "name": "perfil",
+          "type": "perfil_usuario",
+          "typeSchema": "public",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "ativo": {
+          "name": "ativo",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": true
+        },
+        "totp_segredo_cifrado": {
+          "name": "totp_segredo_cifrado",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "tentativas_falhas": {
+          "name": "tentativas_falhas",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "default": 0
+        },
+        "bloqueado_ate": {
+          "name": "bloqueado_ate",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "ultimo_login": {
+          "name": "ultimo_login",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "criado_em": {
+          "name": "criado_em",
+          "type": "timestamp with time zone",
+          "primaryKey": false,
+          "notNull": true,
+          "default": "now()"
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {
+        "usuarios_escola_id_escolas_id_fk": {
+          "name": "usuarios_escola_id_escolas_id_fk",
+          "tableFrom": "usuarios",
+          "tableTo": "escolas",
+          "columnsFrom": [
+            "escola_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {
+        "usuarios_email_unique": {
+          "name": "usuarios_email_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "email"
+          ]
+        }
+      },
+      "policies": {},
+      "checkConstraints": {
+        "super_admin_sem_escola": {
+          "name": "super_admin_sem_escola",
+          "value": "(\"usuarios\".\"perfil\" = 'SUPER_ADMIN') = (\"usuarios\".\"escola_id\" IS NULL)"
+        }
+      },
+      "isRLSEnabled": false
+    }
+  },
+  "enums": {
+    "public.forma_pagamento": {
+      "name": "forma_pagamento",
+      "schema": "public",
+      "values": [
+        "PIX",
+        "DINHEIRO"
+      ]
+    },
+    "public.modo_identificacao": {
+      "name": "modo_identificacao",
+      "schema": "public",
+      "values": [
+        "IDENTIFICADA",
+        "PARCIAL",
+        "ANONIMA"
+      ]
+    },
+    "public.perfil_usuario": {
+      "name": "perfil_usuario",
+      "schema": "public",
+      "values": [
+        "SUPER_ADMIN",
+        "ADMIN_ESCOLA",
+        "FINANCEIRO",
+        "OPERADOR",
+        "LEITURA"
+      ]
+    },
+    "public.status_campanha": {
+      "name": "status_campanha",
+      "schema": "public",
+      "values": [
+        "RASCUNHO",
+        "ATIVA",
+        "PAUSADA",
+        "ENCERRADA"
+      ]
+    },
+    "public.status_entrega": {
+      "name": "status_entrega",
+      "schema": "public",
+      "values": [
+        "NAO_SE_APLICA",
+        "PENDENTE",
+        "ENTREGUE"
+      ]
+    },
+    "public.status_pagamento": {
+      "name": "status_pagamento",
+      "schema": "public",
+      "values": [
+        "CRIADO",
+        "ATIVO",
+        "CONCLUIDO",
+        "EXPIRADO",
+        "REMOVIDO",
+        "DEVOLVIDO",
+        "FALHOU"
+      ]
+    },
+    "public.status_pedido": {
+      "name": "status_pedido",
+      "schema": "public",
+      "values": [
+        "AGUARDANDO_PAGAMENTO",
+        "PIX_GERADO",
+        "PAGO",
+        "CANCELADO",
+        "EXPIRADO",
+        "ESTORNADO"
+      ]
+    },
+    "public.tipo_item": {
+      "name": "tipo_item",
+      "schema": "public",
+      "values": [
+        "COTA",
+        "VALOR_LIVRE",
+        "CONTRIBUICAO_MENSAL",
+        "PRODUTO"
+      ]
+    }
+  },
+  "schemas": {},
+  "sequences": {},
+  "roles": {},
+  "policies": {},
+  "views": {},
+  "_meta": {
+    "columns": {},
+    "schemas": {},
+    "tables": {}
+  }
+}

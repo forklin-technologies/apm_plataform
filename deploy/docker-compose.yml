@@ -1,0 +1,20 @@
+services:
+  app:
+    build: ..
+    env_file: ../.env
+    restart: unless-stopped
+  jobs:
+    build: ..
+    env_file: ../.env
+    command: ["npm", "run", "jobs"]
+    restart: unless-stopped
+  caddy:
+    image: caddy:2
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./bb-webhook-ca.pem:/etc/caddy/bb-webhook-ca.pem:ro
+      - caddy_data:/data
+    restart: unless-stopped
+volumes:
+  caddy_data:
