@@ -2,15 +2,20 @@ from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
-
 from sqlalchemy import Engine, create_engine
+from sqlalchemy.orm import Session
 
 from app.core.config import AdminSettings, Settings, get_admin_settings
 from app.db.session import get_db
 from app.main import create_app
-from tests.dbsupport import Tenants, create_tenants, delete_tenants
+from tests.dbsupport import (
+    ScratchDb,
+    Tenants,
+    create_tenants,
+    delete_tenants,
+    run_alembic,
+    scratch_database,
+)
 from tests.helpers import UNREACHABLE_DATABASE_URL, make_settings
 
 
@@ -92,3 +97,25 @@ def tenants(admin_engine: Engine) -> Iterator[Tenants]:
     finally:
         with admin_engine.begin() as connection:
             delete_tenants(connection, created)
+
+
+@pytest.fixture
+def scratch_db(admin_settings: AdminSettings) -> Iterator[ScratchDb]:
+    """An empty throwaway database (dropped afterwards) for tests that run migrations on it."""
+    with scratch_database(
+        admin_settings.database_admin_url.get_secret_value(),
+        admin_settings.database_url.get_secret_value(),
+    ) as database:
+        yield database
+
+
+@pytest.fixture(scope="session")
+def migrated_scratch_db(admin_settings: AdminSettings) -> Iterator[ScratchDb]:
+    """A throwaway database already at `alembic upgrade head`. Tests may add rows, not DDL."""
+    with scratch_database(
+        admin_settings.database_admin_url.get_secret_value(),
+        admin_settings.database_url.get_secret_value(),
+    ) as database:
+        result = run_alembic(database, "upgrade", "head")
+        assert result.returncode == 0, result.stderr
+        yield database
