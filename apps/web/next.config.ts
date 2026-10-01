@@ -32,6 +32,8 @@ const securityHeaders = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  // O `next dev` gera AGENTS.md/CLAUDE.md sozinho; fora do escopo desta tarefa.
+  agentRules: false,
   reactStrictMode: true,
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${apiProxyUrl}/api/:path*` }];

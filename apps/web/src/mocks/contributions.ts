@@ -99,10 +99,10 @@ function deterministicReceipt(school: PublicSchool, token: string): Receipt {
     identification.guardianName = SAMPLE_GUARDIANS[h % SAMPLE_GUARDIANS.length];
   }
   if (school.identification.studentName !== "HIDDEN") {
-    identification.studentName = SAMPLE_STUDENTS[(h >> 3) % SAMPLE_STUDENTS.length];
+    identification.studentName = SAMPLE_STUDENTS[(h >>> 3) % SAMPLE_STUDENTS.length];
   }
   if (school.identification.classroom !== "HIDDEN") {
-    identification.classroom = SAMPLE_CLASSES[(h >> 6) % SAMPLE_CLASSES.length];
+    identification.classroom = SAMPLE_CLASSES[(h >>> 6) % SAMPLE_CLASSES.length];
   }
   const day = 1 + (h % 28);
   const paidAt = new Date(Date.UTC(2026, 8, day, 14 + (h % 6), h % 60)).toISOString();

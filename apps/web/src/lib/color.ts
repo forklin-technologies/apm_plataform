@@ -85,7 +85,7 @@ export function ensureContrast(color: Rgb, backgrounds: Rgb[], min: number): Rgb
 // Superficies do chrome (precisam bater com globals.css).
 export const SURFACES = {
   light: [parseHex("#ffffff")!, parseHex("#f3f4f6")!],
-  dark: [parseHex("#1b1e24")!, parseHex("#111317")!],
+  dark: [parseHex("#1a1d23")!, parseHex("#0f1115")!],
 } as const;
 
 export interface SchoolTheme {

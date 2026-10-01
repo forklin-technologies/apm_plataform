@@ -95,6 +95,18 @@ describe("mock de contribuicao e Pix", () => {
     expect(a.ok && a.data.status).toBe("PAID");
   });
 
+  it("comprovante de exemplo traz todos os campos visiveis da escola, para qualquer token", async () => {
+    for (let i = 0; i < 200; i += 1) {
+      const result = await mockContributions.getReceipt("escola-exemplo", `demo-token-${i}-xyz`);
+      if (!result.ok) throw new Error("falhou");
+      expect(result.data.identification.guardianName).toBeTruthy();
+      expect(result.data.identification.studentName).toBeTruthy();
+      expect(result.data.identification.classroom).toBeTruthy();
+    }
+    const horizonte = await mockContributions.getReceipt("escola-horizonte", "demo-comprovante-0001");
+    expect(horizonte.ok && horizonte.data.identification).not.toHaveProperty("classroom");
+  });
+
   it("rejeita token mal formado e escola inexistente", async () => {
     expect((await mockContributions.getReceipt("escola-exemplo", "../etc/passwd")).ok).toBe(false);
     expect((await mockContributions.getReceipt("nao-existe", "demo-comprovante-0001")).ok).toBe(false);

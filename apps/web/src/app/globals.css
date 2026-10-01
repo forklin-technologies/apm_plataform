@@ -1,0 +1,393 @@
+@import "tailwindcss";
+
+/* ------------------------------------------------------------------ tokens
+   Chrome neutro. A cor da escola entra so por --accent* (ver .school-theme). */
+
+:root {
+  color-scheme: light dark;
+
+  --bg: #f3f4f6;
+  --surface: #ffffff;
+  --raised: #ffffff;
+  --field: #f6f7f9;
+  --line: rgb(20 24 32 / 0.11);
+  --field-border: #868d9a;
+  --grid: rgb(20 24 32 / 0.055);
+
+  --ink: #14171c;
+  --ink-2: #4b5260;
+  --ink-3: #626a78;
+
+  --ok: #176f45;
+  --ok-soft: #e1f3e9;
+  --warn: #8a4b00;
+  --warn-soft: #fdeed6;
+  --bad: #b3232f;
+  --bad-soft: #fde6e8;
+  --info: #2450b8;
+  --info-soft: #e5ecfb;
+  --neutral-soft: #eceef2;
+
+  --focus: #0a62d6;
+
+  --accent: #16181d;
+  --accent-contrast: #ffffff;
+  --accent-ink: var(--ink);
+
+  --bar: rgb(255 255 255 / 0.72);
+  --shadow-float: 0 1px 2px rgb(16 20 28 / 0.06), 0 12px 32px -8px rgb(16 20 28 / 0.18);
+  --shadow-sheet: 0 1px 1px rgb(16 20 28 / 0.05), 0 10px 28px -10px rgb(16 20 28 / 0.22);
+
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 22px;
+  --r-xl: 30px;
+
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --spring: linear(
+    0, 0.009, 0.035 2.1%, 0.141 4.4%, 0.723 12.9%, 0.938 16.7%, 1.017 19.1%, 1.077 21.8%,
+    1.121 24.5%, 1.149 27.4%, 1.159 30.5%, 1.15 33.2%, 1.129 36.2%, 1.063 42.3%, 1.017 48%,
+    0.992 55.7%, 0.987 61.9%, 0.998 74.1%, 1
+  );
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115;
+    --surface: #1a1d23;
+    --raised: #242831;
+    --field: #12151a;
+    --line: rgb(255 255 255 / 0.12);
+    --field-border: #7c8494;
+    --grid: rgb(255 255 255 / 0.05);
+
+    --ink: #f1f3f6;
+    --ink-2: #b4bac6;
+    --ink-3: #98a0ae;
+
+    --ok: #62d79d;
+    --ok-soft: rgb(98 215 157 / 0.14);
+    --warn: #f3b563;
+    --warn-soft: rgb(243 181 99 / 0.14);
+    --bad: #ff8f99;
+    --bad-soft: rgb(255 143 153 / 0.14);
+    --info: #94b3ff;
+    --info-soft: rgb(148 179 255 / 0.15);
+    --neutral-soft: rgb(255 255 255 / 0.09);
+
+    --focus: #7db0ff;
+
+    --accent: #f1f3f6;
+    --accent-contrast: #0f1115;
+
+    --bar: rgb(26 29 35 / 0.72);
+    --shadow-float: 0 1px 2px rgb(0 0 0 / 0.4), 0 14px 36px -8px rgb(0 0 0 / 0.65);
+    --shadow-sheet: 0 1px 1px rgb(0 0 0 / 0.4), 0 12px 30px -10px rgb(0 0 0 / 0.7);
+  }
+}
+
+/* Cor da escola, calculada em runtime (lib/color.ts) e aplicada no wrapper do portal. */
+.school-theme {
+  --accent: var(--school-accent-light);
+  --accent-contrast: var(--school-accent-contrast-light);
+  --accent-ink: var(--school-accent-ink-light);
+}
+@media (prefers-color-scheme: dark) {
+  .school-theme {
+    --accent: var(--school-accent-dark);
+    --accent-contrast: var(--school-accent-contrast-dark);
+    --accent-ink: var(--school-accent-ink-dark);
+  }
+}
+
+@theme inline {
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-field: var(--field);
+  --color-line: var(--line);
+  --color-field-border: var(--field-border);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-neutral-soft: var(--neutral-soft);
+  --color-accent: var(--accent);
+  --color-accent-contrast: var(--accent-contrast);
+  --color-accent-ink: var(--accent-ink);
+
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --radius-xl: var(--r-xl);
+
+  --text-hero: 2.75rem;
+  --text-hero--line-height: 1.04;
+  --text-hero--letter-spacing: -0.04em;
+  --text-hero--font-weight: 700;
+  --text-title: 1.875rem;
+  --text-title--line-height: 1.12;
+  --text-title--letter-spacing: -0.03em;
+  --text-title--font-weight: 700;
+  --text-heading: 1.375rem;
+  --text-heading--line-height: 1.22;
+  --text-heading--letter-spacing: -0.02em;
+  --text-heading--font-weight: 650;
+  --text-headline: 1.0625rem;
+  --text-headline--line-height: 1.3;
+  --text-headline--letter-spacing: -0.012em;
+  --text-headline--font-weight: 600;
+  --text-body: 1.0625rem;
+  --text-body--line-height: 1.45;
+  --text-body--letter-spacing: -0.01em;
+  --text-sub: 0.9375rem;
+  --text-sub--line-height: 1.4;
+  --text-sub--letter-spacing: -0.006em;
+  --text-foot: 0.8125rem;
+  --text-foot--line-height: 1.38;
+  --text-tab: 0.6875rem;
+  --text-tab--line-height: 1.2;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 1.0625rem;
+    line-height: 1.45;
+    letter-spacing: -0.01em;
+    -webkit-font-smoothing: antialiased;
+    min-height: 100dvh;
+    overflow-x: clip;
+  }
+  :focus-visible {
+    outline: 3px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+  button,
+  [role="button"],
+  summary {
+    cursor: pointer;
+  }
+  button:disabled {
+    cursor: not-allowed;
+  }
+  ::selection {
+    background: color-mix(in srgb, var(--focus) 28%, transparent);
+  }
+  /* Cantos continuos quando o navegador suporta (Chrome 139+, Safari TP). */
+  @supports (corner-shape: squircle) {
+    * {
+      corner-shape: squircle;
+    }
+    .rounded-full {
+      corner-shape: round;
+    }
+  }
+}
+
+/* ------------------------------------------------------------------ componentes */
+
+/* Barra translucente (topo, abas) */
+.bar-material {
+  background: var(--bar);
+  -webkit-backdrop-filter: saturate(180%) blur(22px);
+  backdrop-filter: saturate(180%) blur(22px);
+}
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .bar-material {
+    background: var(--surface);
+  }
+}
+
+/* Caderno quadriculado: o fundo da primeira dobra */
+.paper-grid {
+  position: relative;
+  isolation: isolate;
+}
+.paper-grid::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 28px 28px;
+  background-position: -1px -1px;
+  -webkit-mask-image: linear-gradient(to bottom, #000 25%, transparent 92%);
+  mask-image: linear-gradient(to bottom, #000 25%, transparent 92%);
+}
+
+/* Recibo: folha com borda serrilhada embaixo */
+.receipt-sheet {
+  background: var(--surface);
+  border-radius: var(--r-lg) var(--r-lg) 0 0;
+}
+.receipt-wrap {
+  filter: drop-shadow(0 1px 1px rgb(16 20 28 / 0.08)) drop-shadow(0 14px 22px rgb(16 20 28 / 0.14));
+}
+@media (prefers-color-scheme: dark) {
+  .receipt-wrap {
+    filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.5)) drop-shadow(0 14px 24px rgb(0 0 0 / 0.5));
+  }
+}
+.receipt-edge {
+  display: block;
+  width: 100%;
+  height: 10px;
+  color: var(--surface);
+}
+
+/* Carimbo (o unico momento orquestrado: confirmacao do pagamento) */
+@keyframes stamp-in {
+  0% {
+    opacity: 0;
+    transform: scale(1.7) rotate(-18deg);
+  }
+  35% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) rotate(-8deg);
+  }
+}
+@keyframes stamp-ring {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes stamp-check {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes stamp-ripple {
+  from {
+    opacity: 0.45;
+    transform: scale(0.9);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}
+.stamp {
+  transform: rotate(-8deg);
+  animation: stamp-in 620ms var(--spring) both;
+}
+.stamp-ring {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+  animation: stamp-ring 520ms var(--ease-out) 60ms both;
+}
+.stamp-check {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+  animation: stamp-check 380ms var(--ease-out) 360ms both;
+}
+.stamp-ripple {
+  animation: stamp-ripple 900ms var(--ease-out) 280ms both;
+}
+
+/* Resposta direta a acoes */
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.step-in {
+  animation: rise-in 240ms var(--ease-out) both;
+}
+@keyframes pop {
+  0% {
+    transform: scale(0.6);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+.pop {
+  animation: pop 320ms var(--spring) both;
+}
+
+/* Carregamento */
+@keyframes shimmer {
+  to {
+    background-position-x: -200%;
+  }
+}
+.skeleton {
+  background: linear-gradient(100deg, var(--neutral-soft) 30%, color-mix(in srgb, var(--neutral-soft) 40%, var(--surface)) 50%, var(--neutral-soft) 70%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+  border-radius: 8px;
+}
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.pulse-dot {
+  animation: pulse-dot 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  .skeleton {
+    background: var(--neutral-soft);
+  }
+}
+
+.sr-only-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
