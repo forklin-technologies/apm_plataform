@@ -99,6 +99,26 @@ describe("ApiStatusChip: reconsulta em intervalo moderado", () => {
     expect(check.mock.calls.length).toBeLessThanOrEqual(15);
   });
 
+  it("com o documento oculto (portal do Maestri) continua consultando, so mais devagar (60 s)", async () => {
+    Object.defineProperty(document, "visibilityState", { value: "hidden", configurable: true });
+    try {
+      const check = vi.fn().mockResolvedValue(READY);
+      render(<ApiStatusChip check={check} />);
+      const advance = async (ms: number) =>
+        act(async () => {
+          await vi.advanceTimersByTimeAsync(ms);
+        });
+      await advance(0);
+      expect(check).toHaveBeenCalledTimes(1);
+      await advance(45_000); // o intervalo normal (30 s) NAO dispara oculto
+      expect(check).toHaveBeenCalledTimes(1);
+      await advance(16_000); // 61 s: dispara (nunca para)
+      expect(check).toHaveBeenCalledTimes(2);
+    } finally {
+      Object.defineProperty(document, "visibilityState", { value: "visible", configurable: true });
+    }
+  });
+
   it("para de consultar ao desmontar", async () => {
     const check = vi.fn().mockResolvedValue(READY);
     const { unmount } = render(<ApiStatusChip check={check} />);
