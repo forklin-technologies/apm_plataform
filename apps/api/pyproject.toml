@@ -33,8 +33,9 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "S", "C4"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]
-# Migrations build DDL from module constants (table and column names), never from input.
-"migrations/**" = ["S608"]
+# Migrations build DDL from module constants (table and column names), never from input, and carry
+# SQL in string literals that read better unwrapped.
+"migrations/**" = ["S608", "E501"]
 
 [tool.mypy]
 python_version = "3.12"

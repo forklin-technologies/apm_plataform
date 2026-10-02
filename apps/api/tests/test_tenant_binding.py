@@ -89,9 +89,8 @@ def test_a_first_bind_inside_a_savepoint_is_refused(app_engine: Engine, tenants:
     """Applied inside a SAVEPOINT the setting would vanish on rollback: bind before opening one."""
     with sessionmaker(app_engine)() as session:
         session.execute(text("SELECT 1"))  # open the outer transaction
-        with session.begin_nested():
-            with pytest.raises(TenantContextConflict):
-                bind_tenant(session, TenantContext(tenants.org_a))
+        with session.begin_nested(), pytest.raises(TenantContextConflict):
+            bind_tenant(session, TenantContext(tenants.org_a))
         assert "tenant_context" not in session.info
         assert _school_ids(session, tenants) == set()  # still unbound: fails closed
 
@@ -118,7 +117,9 @@ def test_the_identity_map_never_holds_objects_of_two_tenants(
             bind_tenant(session, TenantContext(tenants.org_b))
         # Even after the refused attempt, nothing of B can be loaded into this session.
         assert session.get(School, tenants.school_b1) is None
-        organization_ids = {obj.organization_id for obj in session.identity_map.values()}
+        organization_ids = {
+            getattr(obj, "organization_id", None) for obj in session.identity_map.values()
+        }
         assert organization_ids <= {tenants.org_a}
 
 

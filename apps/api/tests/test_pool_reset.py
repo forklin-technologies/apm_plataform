@@ -45,7 +45,7 @@ def plain_engine(admin_settings: AdminSettings) -> Iterator[Engine]:
 def _plant(engine: Engine) -> Any:
     """Leave every kind of session state behind on the pooled connection; return its backend pid."""
     with engine.connect() as connection:
-        pid = connection.execute(text("SELECT pg_backend_pid()")).scalar_one()
+        pid: Any = connection.execute(text("SELECT pg_backend_pid()")).scalar_one()
         connection.exec_driver_sql("SET application_name = 'planted'")
         connection.exec_driver_sql("SET statement_timeout = '7s'")
         connection.exec_driver_sql("SET search_path = pg_temp, public")
@@ -73,7 +73,8 @@ def _observe(engine: Engine) -> dict[str, Any]:
             "prepared": one("SELECT count(*) FROM pg_prepared_statements"),
             "cursors": one("SELECT count(*) FROM pg_cursors"),
             "advisory_locks": one(
-                "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND pid = pg_backend_pid()"
+                "SELECT count(*) FROM pg_locks "
+                "WHERE locktype = 'advisory' AND pid = pg_backend_pid()"
             ),
             "listening": one("SELECT count(*) FROM pg_listening_channels()"),
         }
@@ -134,7 +135,7 @@ def test_a_temp_table_planted_with_pg_temp_first_cannot_shadow_the_real_table(
 
     with hooked_engine.connect() as connection:
         # Resolves to the real public.schools, not to the planted temporary table.
-        columns = connection.execute(
+        columns: Any = connection.execute(
             text(
                 "SELECT count(*) FROM information_schema.columns WHERE table_name = 'schools' "
                 "AND table_schema = 'public' AND column_name = 'organization_id'"
@@ -153,7 +154,7 @@ def test_the_tenant_context_is_still_gone_after_the_hook(
         apply_tenant_context(connection, TenantContext(tenants.org_a))
         connection.commit()
     with hooked_engine.connect() as connection:
-        setting = connection.execute(
+        setting: Any = connection.execute(
             text("SELECT current_setting('app.organization_id', true)")
         ).scalar_one()
     assert setting in (None, "")
@@ -173,10 +174,10 @@ def test_application_role_has_no_temporary_privilege(
     admin_engine: Engine, app_engine: Engine
 ) -> None:
     with admin_engine.connect() as connection:
-        allowed = connection.execute(
+        allowed: Any = connection.execute(
             text("SELECT has_database_privilege('apm_app', current_database(), 'TEMPORARY')")
         ).scalar_one()
-        public_grants = connection.execute(
+        public_grants: Any = connection.execute(
             text(
                 "SELECT count(*) FROM pg_database d, aclexplode(d.datacl) a "
                 "WHERE d.datname = current_database() AND a.grantee = 0 "

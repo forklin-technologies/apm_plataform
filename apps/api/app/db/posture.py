@@ -30,7 +30,8 @@ _TABLES_QUERY = text(
     "WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname = ANY(:tables)"
 )
 _DEFINERS_QUERY = text(
-    "SELECT n.nspname || '.' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' "
+    "SELECT n.nspname || '.' || p.proname "
+    "|| '(' || pg_get_function_identity_arguments(p.oid) || ')' "
     "FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
     "WHERE p.prosecdef AND n.nspname NOT IN ('pg_catalog', 'information_schema')"
 )

@@ -1,14 +1,17 @@
 """T6: the seed refuses production and only ever creates fake, repeatable data."""
 
 import os
+import secrets
 import subprocess
 import sys
 from typing import Any
 
 import pytest
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import Engine, create_engine, select, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
+from app.core.config import AdminSettings
 from app.db.tenant import TenantContext, tenant_session
 from app.models import Organization, School
 from app.seed import FAKE_EMAIL_DOMAIN, MEMBERSHIPS, ORGANIZATIONS, SCHOOLS, USERS, seed
@@ -145,3 +148,47 @@ def test_seeded_tenants_are_isolated_for_the_application_role(
 
     assert organizations == {"demo-rede"}
     assert schools == {"demo-aurora", "demo-horizonte"}
+
+
+def test_seed_refuses_an_admin_that_cannot_bypass_row_level_security(
+    admin_engine: Engine, admin_settings: AdminSettings
+) -> None:
+    """K14: the seed writes tenants and users, which the application role cannot; with an admin
+    that is subject to RLS it must stop with a clear message instead of failing half way."""
+    role = f"apm_t_nobypass_{secrets.token_hex(4)}"
+    password = secrets.token_hex(16)
+    with admin_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+        connection.execute(
+            text(f"CREATE ROLE {role} LOGIN PASSWORD '{password}' NOSUPERUSER NOBYPASSRLS")
+        )
+    try:
+        admin_url = (
+            make_url(admin_settings.database_admin_url.get_secret_value())
+            .set(username=role, password=password)
+            .render_as_string(hide_password=False)
+        )
+        with admin_engine.connect() as connection:
+            before: Any = connection.execute(
+                text("SELECT count(*) FROM organizations")
+            ).scalar_one()
+
+        result = _run_seed(
+            {
+                "ENV": "development",
+                "DATABASE_URL": admin_settings.database_url.get_secret_value(),
+                "DATABASE_ADMIN_URL": admin_url,
+            }
+        )
+
+        with admin_engine.connect() as connection:
+            after: Any = connection.execute(text("SELECT count(*) FROM organizations")).scalar_one()
+    finally:
+        with admin_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as connection:
+            connection.execute(text(f"DROP ROLE IF EXISTS {role}"))
+
+    assert result.returncode == 1
+    assert "the admin role must be able to bypass row level security" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert password not in result.stdout + result.stderr
+    assert result.stdout == ""
+    assert after == before

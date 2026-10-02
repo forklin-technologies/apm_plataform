@@ -69,7 +69,8 @@ def clean_cluster() -> Iterator[CleanCluster]:
         with engine.connect() as connection:
             connection.execute(
                 text(
-                    f"CREATE ROLE {CI_ADMIN} LOGIN CREATEROLE NOSUPERUSER PASSWORD '{admin_password}'"
+                    f"CREATE ROLE {CI_ADMIN} LOGIN CREATEROLE NOSUPERUSER "
+                    f"PASSWORD '{admin_password}'"
                 )
             )
             connection.execute(text(f'CREATE DATABASE "{DATABASE}" OWNER {CI_ADMIN}'))

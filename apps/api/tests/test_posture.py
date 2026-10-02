@@ -17,9 +17,10 @@ from sqlalchemy import Engine, text
 
 from app.core.config import AdminSettings, Settings
 from app.db import posture
-from app.db.posture import PostureError, assert_posture, check_posture, cheap_posture_ok
+from app.db.posture import PostureError, assert_posture, cheap_posture_ok, check_posture
 from app.main import create_app
 from tests.dbsupport import API_DIR
+from tests.helpers import make_settings
 
 UNREACHABLE = "postgresql+psycopg://apm_app:SECRETPW123@127.0.0.1:1/none"
 
@@ -42,11 +43,7 @@ def _findings(app_engine: Engine) -> list[str]:
 
 
 def _settings(admin_settings: AdminSettings, env: str = "development") -> Settings:
-    return Settings(  # type: ignore[call-arg]
-        _env_file=None,
-        env=env,
-        database_url=admin_settings.database_url.get_secret_value(),
-    )
+    return make_settings(env=env, database_url=admin_settings.database_url.get_secret_value())
 
 
 def test_a_healthy_database_has_no_findings(app_engine: Engine) -> None:
@@ -128,7 +125,7 @@ def test_temporary_privilege_is_reported(admin_engine: Engine, app_engine: Engin
     grant = "GRANT TEMPORARY ON DATABASE {db} TO PUBLIC"
     revoke = "REVOKE TEMPORARY ON DATABASE {db} FROM PUBLIC"
     with admin_engine.connect() as connection:
-        database = connection.execute(text("SELECT current_database()")).scalar_one()
+        database: Any = connection.execute(text("SELECT current_database()")).scalar_one()
     with tampered(
         admin_engine, grant.format(db=f'"{database}"'), revoke.format(db=f'"{database}"')
     ):
@@ -145,7 +142,7 @@ def test_connecting_as_a_different_role_is_reported(admin_engine: Engine) -> Non
 
 
 def test_the_closed_list_of_security_definer_functions_is_empty_for_now() -> None:
-    assert posture.ALLOWED_SECURITY_DEFINER == frozenset()
+    assert frozenset() == posture.ALLOWED_SECURITY_DEFINER
 
 
 # --- startup -----------------------------------------------------------------------------------
@@ -171,12 +168,12 @@ def test_the_api_refuses_to_start_on_a_tampered_database(
     admin_engine: Engine, admin_settings: AdminSettings, apply: str, restore: str, code: str
 ) -> None:
     app_password = admin_settings.database_url.get_secret_value().split(":")[2].split("@")[0]
-    with tampered(admin_engine, apply, restore):
-        with (
-            pytest.raises(PostureError) as error,
-            TestClient(create_app(_settings(admin_settings))),
-        ):
-            pass
+    with (
+        tampered(admin_engine, apply, restore),
+        pytest.raises(PostureError) as error,
+        TestClient(create_app(_settings(admin_settings))),
+    ):
+        pass
 
     message = str(error.value)
     assert code in message
