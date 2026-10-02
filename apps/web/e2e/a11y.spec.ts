@@ -1,8 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 
-test.use({ bypassCSP: true });
-
 const routes = ["/", "/apm/escola-exemplo", "/apm/escola-exemplo/pedido/demo-comprovante-0001", "/painel", "/login", "/apm/nao-existe"];
 
 for (const route of routes) {
