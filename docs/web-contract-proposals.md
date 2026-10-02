@@ -30,6 +30,12 @@ Fonte: `/api/openapi.json` da API em `http://127.0.0.1:8001`.
   painel é a sessão. O seletor de organização/escola do painel é só visual.
 - **Respostas de erro iguais** para "não existe" e "não é seu" nos endpoints públicos (sem
   enumeração de escolas ou pedidos).
+- **O frontend nunca afirma pagamento sem a camada de dados** (ADR-005, ADR-011): o HTML de um
+  comprovante renderizado no servidor só pode dizer "Pago" se o próprio servidor recebeu `PAID` do
+  backend; senão o estado é neutro ("Conferindo seu comprovante") até a resposta chegar.
+- **O navegador não retém dado pessoal.** Responsável, aluno e turma vivem só no servidor. (O mock do
+  protótipo os guarda em `sessionStorage` por até 30 min e os apaga depois de mostrar o comprovante;
+  o backend real não precisa disso.)
 
 ## Portal público (sem login, ADR-010)
 
@@ -79,7 +85,7 @@ ou `"amount": { "kind": "CUSTOM", "amount_cents": 1550 }`.
 
 ```json
 {
-  "token": "<opaco, URL-safe, >= 128 bits de entropia>",
+  "token": "<opaco, base64url, >= 128 bits de entropia (22 caracteres), gerado no servidor>",
   "charge": {
     "status": "PENDING",
     "amount_cents": 20000,
@@ -105,7 +111,9 @@ partir do webhook validado e idempotente do banco, mais a reconsulta à API do b
 
 ### P4. `GET /api/public/schools/{slug}/contributions/{token}/receipt`
 
-Comprovante, acessado por link com token (sem login). `200` só quando `PAID`; `409` caso contrário.
+Comprovante, acessado por link com token (sem login). `200` só quando `PAID`; `409` caso contrário;
+`404` **idêntico** para token que nunca existiu, token de outra escola e token malformado (sem
+enumeração). O web só aceita tokens de 22 a 64 caracteres base64url; formato fora disso nem chega à API.
 
 ```json
 {

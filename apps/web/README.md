@@ -17,13 +17,16 @@ Produção local (a "prévia"):
 
 ```bash
 npm run build
-npm run start -- -p 3100 -H 127.0.0.1
+npm run start -- -p 3100     # o script start já embute -H 127.0.0.1: não abre a rede sozinho
 ```
+
+Para expor de propósito (por exemplo, dentro de um container atrás do proxy reverso), passe o host
+no comando: `npm run start -- -H 0.0.0.0 -p 3000`. O último `-H` vence.
 
 | Script | O que faz |
 |---|---|
 | `npm run dev` | servidor de desenvolvimento em 127.0.0.1:3101 |
-| `npm run build` / `start` | build e servidor de produção |
+| `npm run build` / `start` | build e servidor de produção (`start` só liga em 127.0.0.1) |
 | `npm run lint` | ESLint |
 | `npm run typecheck` | `tsc --noEmit` |
 | `npm test` | Vitest + Testing Library (inclui os guardas de CSS/animação) |
@@ -64,8 +67,29 @@ src/proxy.ts      CSP com nonce por requisição
   porque a cor da escola é aplicada como variáveis CSS num atributo `style` (renderizado no servidor).
 - `X-Content-Type-Options`, `Referrer-Policy: no-referrer`, `X-Frame-Options`, `Permissions-Policy`
   e `poweredByHeader` desligado (`next.config.ts`). HSTS fica com o proxy reverso (HTTPS).
+- O matcher do `proxy.ts` exclui só `/api`, `/api/*` e os estáticos: `/apix`, `/api-docs` e `/apiary`
+  recebem a CSP com nonce (testado em unidade e em e2e).
+- Páginas de erro (`error.tsx`, `global-error.tsx`) em português, sem expor `error.message`.
 - Sem `dangerouslySetInnerHTML` (regra de lint). Sem segredos e sem `NEXT_PUBLIC_*`.
 - Em produção, o proxy reverso não deve sobrescrever o `Content-Security-Policy` das páginas.
+
+## Comprovante e privacidade (dado de criança)
+
+- **O comprovante só afirma o que a camada de dados confirma.** Só o link de exemplo
+  (`/apm/escola-exemplo/pedido/demo-comprovante-0001`) tem comprovante fixo. Para qualquer outro token o
+  HTML do servidor sai **neutro** ("Conferindo seu comprovante": sem "Pago", sem nome, sem valor) e quem
+  responde é a camada de dados, no navegador: comprovante, "ainda não confirmado" ou a mesma 404
+  estilizada (sem diferenciar "nunca existiu" de "ainda não existe").
+- Token do mock: 16 bytes de `crypto.getRandomValues` em base64url (22 caracteres, 128 bits, sem viés de
+  módulo). O frontend só confere o formato (22 a 64 caracteres seguros para URL); token curto é 404 de
+  verdade (HTTP).
+- No protótipo o mock guarda o pedido em `sessionStorage` só durante o fluxo: o nome do responsável, do
+  aluno e a turma são **apagados depois que o comprovante é mostrado**, e o pedido inteiro expira em 30
+  minutos mesmo que o comprovante nunca seja aberto. O link segue abrindo (sem os nomes) até o TTL.
+- Nenhum `<form>` cai em GET com dados na URL (todos `method="post"` com `preventDefault`); campos de nome
+  sem corretor ortográfico (`spellcheck=false`) e aluno/turma sem autopreenchimento.
+- Colar no campo de valor interpreta **reais** (`1.000` = R$ 1.000,00, `1,50` = R$ 1,50); o que não é
+  valor é ignorado com um aviso curto. Digitar continua com a máscara de caixa eletrônico.
 
 ## Animações são melhoria progressiva (WebKit, portal do Maestri)
 
@@ -78,11 +102,19 @@ entrada parada em `t=0` mantém o keyframe inicial para sempre, e `opacity: 0` v
 - toda animação de entrada só existe sob `[data-motion="on"]`, que o `MotionGate` liga **apenas** com o
   documento visível; oculto, o conteúdo aparece direto no estado final;
 - as animações de passo só rodam depois de uma ação do usuário, nunca no carregamento da página;
+- o carimbo "Pago" entra por escala (nunca por `stroke-dashoffset`): congelado em qualquer ponto, o símbolo
+  continua visível;
 - o polling do chip da API não para com o documento oculto, só fica mais lento (60 s).
 
-Guardas: `src/app/motion-css.test.ts` (Vitest) e `e2e/visible-content.spec.ts` (WebKit e Chromium nos
-cenários `normal`, `frozen`, com TODA animação pausada em t=0, e `hidden`, com o documento oculto).
-O e2e falha se algum texto visível ficar com opacidade efetiva < 0,9.
+Guardas (Vitest): `src/app/motion-css.test.ts` + `src/test-utils/css-guard.ts` (opacity 0/0%, visibility,
+escala < 0,1, translate fora da tela, clip-path, content-visibility e tamanho 0, no keyframe inicial e no
+estado base, com testes de mutação), `src/hidden-content-sources.test.ts` (utilitários Tailwind que
+escondem e o `MotionGate` no layout). Guardas (e2e, **com a CSP real ativa**, sem `bypassCSP`):
+`e2e/visible-content.spec.ts` em WebKit e Chromium nos cenários `normal`, `frozen` (toda `CSSAnimation`
+pausada em t=0 por Web Animations) e `hidden` (documento oculto + linha do tempo congelada, como o portal
+do Maestri; exige `data-motion` desligado e zero animação de entrada). Falha se algum texto visível ficar
+com opacidade efetiva < 0,9, se o carimbo SVG (anel/check) sumir ou se houver violação de CSP.
+`e2e/detectors.spec.ts` testa os próprios detectores.
 
 Observação para quem testa pelo portal do Maestri: a CSP de produção não permite `eval`, então
 `maestri portal evaluate` não funciona na prévia (3100); `snapshot`, `click`, `fill` e `screenshot`
