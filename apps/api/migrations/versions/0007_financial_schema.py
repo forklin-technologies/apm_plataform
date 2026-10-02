@@ -1856,18 +1856,36 @@ GRANTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
 }
 
 
+def _write_check(table: str) -> str:
+    """WITH CHECK of the write policies: the scope predicate AND "the school belongs to the
+    organization of the row". Without the second half, an organization-wide context could write a
+    row with its own organization_id and a school of ANOTHER organization: the policy would pass
+    (it only compares the organization), and a unique index would answer before the composite
+    foreign key does, with a duplicate-key error that reveals the other school has data. The
+    subquery runs under the row level security of schools, so a school of another tenant is simply
+    not there: the write fails with the one error of the policy, before any index."""
+    in_school = (
+        "EXISTS (SELECT 1 FROM public.schools s "
+        f"WHERE s.id = {table}.school_id AND s.organization_id = {table}.organization_id)"
+    )
+    if table == "audit_logs":  # an event of the organization itself has no school
+        in_school = f"({table}.school_id IS NULL OR {in_school})"
+    return f"({_scope('organization_id', 'school_id')} AND {in_school})"
+
+
 def _enable_rls_and_grant() -> None:
     for table in NEW_TABLES:
         op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
         op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
         scope = _scope("organization_id", "school_id")
+        write_check = _write_check(table)
         insert_columns, update_columns = GRANTS[table]
         op.execute(f"CREATE POLICY {table}_select ON {table} FOR SELECT USING ({scope})")
-        op.execute(f"CREATE POLICY {table}_insert ON {table} FOR INSERT WITH CHECK ({scope})")
+        op.execute(f"CREATE POLICY {table}_insert ON {table} FOR INSERT WITH CHECK ({write_check})")
         if update_columns:
             op.execute(
                 f"CREATE POLICY {table}_update ON {table} FOR UPDATE "
-                f"USING ({scope}) WITH CHECK ({scope})"
+                f"USING ({scope}) WITH CHECK ({write_check})"
             )
         # No DELETE policy, no DELETE grant: a financial row is never removed.
         op.execute(f"GRANT SELECT ON {table} TO apm_app")
