@@ -104,9 +104,39 @@ def create_tenants(connection: Connection) -> Tenants:
     return Tenants(slugs=slugs, emails=emails, **ids)
 
 
+# Children first. The financial tables refuse DELETE for every role (triggers), so test cleanup
+# switches the triggers off for its own transaction (the admin of the dev database is a superuser).
+FINANCIAL_TABLES = (
+    "audit_logs",
+    "webhook_events",
+    "pix_charges",
+    "expense_attachments",
+    "monthly_closings",
+    "refunds",
+    "reimbursements",
+    "expenses",
+    "contributions",
+    "financial_transactions",
+    "categories",
+    "school_settings",
+)
+
+
+def purge_financial(connection: Connection, org_ids: list[uuid.UUID]) -> None:
+    """Remove every financial row of these organizations. Test cleanup only."""
+    connection.execute(text("SET LOCAL session_replication_role = replica"))
+    for table in FINANCIAL_TABLES:
+        connection.execute(
+            text(f"DELETE FROM {table} WHERE organization_id = ANY(:o)"),  # noqa: S608
+            {"o": org_ids},
+        )
+    connection.execute(text("RESET session_replication_role"))
+
+
 def delete_tenants(connection: Connection, tenants: Tenants) -> None:
     """Remove exactly the rows create_tenants made (and anything a test left under them)."""
     org_ids = [tenants.org_a, tenants.org_b]
+    purge_financial(connection, org_ids)
     connection.execute(
         text("DELETE FROM memberships WHERE organization_id = ANY(:o)"), {"o": org_ids}
     )
