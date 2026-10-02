@@ -6,6 +6,7 @@ import {
   formatBRLNumber,
   isCents,
   parseBRLToCents,
+  parsePastedAmount,
 } from "./money";
 
 const NBSP = " ";
@@ -76,5 +77,20 @@ describe("centsFromDigits", () => {
 
   it("limita o tamanho do campo", () => {
     expect(centsFromDigits("99999999999999999999")).toBe(MAX_INPUT_CENTS);
+  });
+});
+
+describe("parsePastedAmount (N10)", () => {
+  it("le o texto colado como reais", () => {
+    expect(parsePastedAmount("1.000")).toBe(100_000);
+    expect(parsePastedAmount("1,50")).toBe(150);
+    expect(parsePastedAmount("1500")).toBe(150_000);
+    expect(parsePastedAmount("R$ 20,00")).toBe(2000);
+  });
+
+  it("devolve null para o que nao e valor utilizavel", () => {
+    for (const bad of ["", "abc", "1.5", "0", "0,00", "-1", "1.000.000.000,00", "99999999999999"]) {
+      expect(parsePastedAmount(bad)).toBeNull();
+    }
   });
 });

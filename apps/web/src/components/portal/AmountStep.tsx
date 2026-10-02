@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useRef, type Ref } from "react";
+import { useEffect, useRef, useState, type Ref } from "react";
 import { CheckIcon } from "@/components/ui/icons";
 import { TextField } from "@/components/ui/TextField";
 import { Button } from "@/components/ui/Button";
 import type { PublicSchool } from "@/lib/api/types";
-import { centsFromDigits, formatBRL, formatBRLNumber } from "@/lib/money";
+import { centsFromDigits, formatBRL, formatBRLNumber, parsePastedAmount } from "@/lib/money";
 import { StickyActions } from "./FlowChrome";
 
 export const CUSTOM_CHOICE = "custom";
@@ -70,6 +70,19 @@ export function AmountStep({
 }: AmountStepProps) {
   const customRef = useRef<HTMLInputElement>(null);
   const previous = useRef(choice);
+  const [pasteWarning, setPasteWarning] = useState<string | null>(null);
+
+  // Colar ou soltar texto no campo: o valor e lido como REAIS ("1.000" = R$ 1.000,00), nao como
+  // centavos de caixa eletronico. Texto que nao e valor e ignorado, com um aviso curto.
+  const applyPasted = (text: string) => {
+    const cents = parsePastedAmount(text);
+    if (cents === null) {
+      setPasteWarning("Não entendemos o que foi colado. Cole só o valor em reais, como 1.500,00.");
+      return;
+    }
+    setPasteWarning(null);
+    onCustomChange(cents);
+  };
 
   // Resposta direta a acao do usuario: ao escolher "Outro valor", o campo ja recebe o foco.
   useEffect(() => {
@@ -135,10 +148,24 @@ export function AmountStep({
             placeholder="0,00"
             inputRef={customRef}
             value={customCents === 0 ? "" : formatBRLNumber(customCents)}
-            onChange={(e) => onCustomChange(centsFromDigits(e.target.value))}
+            onChange={(e) => {
+              setPasteWarning(null);
+              onCustomChange(centsFromDigits(e.target.value));
+            }}
+            onPaste={(e) => {
+              e.preventDefault();
+              applyPasted(e.clipboardData.getData("text"));
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              applyPasted(e.dataTransfer.getData("text"));
+            }}
             hint={`Mínimo ${formatBRL(minCents)}, máximo ${formatBRL(maxCents)}.`}
             error={customError ?? undefined}
           />
+          <div aria-live="polite">
+            {pasteWarning && <p className="mt-1.5 text-sub font-medium text-warn">{pasteWarning}</p>}
+          </div>
         </div>
       )}
 

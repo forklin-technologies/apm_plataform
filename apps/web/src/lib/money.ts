@@ -50,6 +50,17 @@ export function parseBRLToCents(input: string): Cents | null {
   return isCents(cents) ? cents : null;
 }
 
+/**
+ * Valor COLADO (ou solto) no campo de valor: e lido como REAIS, nao como centavos de caixa
+ * eletronico. "1.000" vira R$ 1.000,00 e "1,50" vira R$ 1,50. Devolve null para o que nao e um
+ * valor utilizavel (texto, ambiguo como "1.5", zero ou acima do limite do campo).
+ */
+export function parsePastedAmount(text: string): Cents | null {
+  const cents = parseBRLToCents(text);
+  if (cents === null || cents <= 0 || cents > MAX_INPUT_CENTS) return null;
+  return cents;
+}
+
 /** Campo mascarado: so os digitos importam e viram centavos (limitado a MAX_INPUT_CENTS). */
 export function centsFromDigits(raw: string): Cents {
   const digits = raw.replace(/\D/g, "").replace(/^0+/, "");
