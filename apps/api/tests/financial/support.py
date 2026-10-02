@@ -394,8 +394,10 @@ def add_refund(
 
 
 def check_consistency(conn: Connection) -> None:
-    """Run the deferred consistency trigger now, on everything this transaction wrote."""
+    """Run the deferred consistency trigger now, on everything this transaction wrote, then go
+    back to deferring it (the builders insert a ledger row before its detail row)."""
     conn.exec_driver_sql("SET CONSTRAINTS ALL IMMEDIATE")
+    conn.exec_driver_sql("SET CONSTRAINTS ALL DEFERRED")
 
 
 def summary(

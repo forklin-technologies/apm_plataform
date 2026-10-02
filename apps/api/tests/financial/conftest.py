@@ -340,3 +340,13 @@ def ledger(admin_engine: Engine, tenants: Tenants) -> Iterator[Ledger]:
         school_b1_webhook_event=b1_webhook,
         bare_ids=(bare_contribution, bare_expense, bare_reimbursement, bare_refund),
     )
+
+
+@pytest.fixture
+def world(admin_engine: Engine) -> Iterator[tuple[Connection, Fresh]]:
+    """A transaction of the admin (a superuser: every trigger fires, row level security does not
+    apply) with a school of its own. Always rolled back, so nothing is left behind."""
+    from tests.dbsupport import transaction
+
+    with transaction(admin_engine) as conn:
+        yield conn, make_school(conn)
