@@ -84,13 +84,23 @@ On the host the settings are read from the real environment first, then from `ap
 | Current revision | `docker compose run --rm tools alembic current` | `uv run alembic current` |
 | Revert all | `docker compose run --rm tools alembic downgrade base` | `uv run alembic downgrade base` |
 | Preview the SQL (no database touched) | `docker compose run --rm tools alembic upgrade head --sql` | `uv run alembic upgrade head --sql` |
-| New revision | `docker compose run --rm --user "$(id -u):$(id -g)" -v "$PWD/apps/api:/app" tools alembic revision -m "message"` | `uv run alembic revision -m "message"` |
+| New revision (written, then fixed and formatted by `ruff` through the `alembic.ini` post-write hooks) | `docker compose run --rm --user "$(id -u):$(id -g)" -v "$PWD/apps/api:/app" tools alembic revision -m "message"` | `uv run alembic revision -m "message"` |
 
 Migrations run as the admin (`DATABASE_ADMIN_URL`) and do their DDL as the non-superuser `apm_owner` role. The password of `apm_app` is set by an online-only step as a SCRAM verifier: it never appears in `--sql`, in logs or in an error.
 
 (The "new revision" Docker variant mounts the source so the generated file lands on your disk.)
 
-## 4. Seed (development only)
+## 4. Check the database posture
+
+Is the API connecting as the unprivileged role, and does the database still have row level security enabled and forced, no unexpected `SECURITY DEFINER` function and no `TEMPORARY` privilege? The API runs this check when it starts (outside `ENV=test`) and refuses to start on any finding; this runs it on demand and prints only fixed codes.
+
+| Docker (repository root) | Host (uv, in `apps/api/`) |
+| --- | --- |
+| `docker compose run --rm tools python -m app.posture` | `uv run python -m app.posture` |
+
+Prints `posture OK`, or `posture FAILED: <codes>` and exits 1. Details: [`docs/tenancy.md`](../../docs/tenancy.md).
+
+## 5. Seed (development only)
 
 Fake data: two organizations, three schools, seven users (`@example.test`) and their memberships. Safe to run twice. It **refuses to run with `ENV=production`**, before opening any connection.
 
@@ -98,15 +108,15 @@ Fake data: two organizations, three schools, seven users (`@example.test`) and t
 | --- | --- |
 | `docker compose run --rm tools python -m app.seed` | `uv run python -m app.seed` |
 
-## 5. Test
+## 6. Test
 
-One command. The isolation tests run against the configured database (so tampering with it makes them fail) and the migration tests create and drop their own scratch databases, which needs the admin credential: use `tools`.
+One command. The isolation tests run against the configured database (so tampering with it makes them fail) and the migration tests create and drop their own scratch databases, which needs the admin credential: use `tools`. `tools` also starts `db-clean`, a second throwaway Postgres cluster (no published port, data in memory) that the tests use to run the migrations as a `CREATEROLE` admin that is not a superuser. Several tests briefly tamper with the shared roles and restore them: run **one test session at a time per cluster**.
 
 | Docker (repository root) | Host (uv, in `apps/api/`) |
 | --- | --- |
 | `docker compose run --rm tools pytest` | `uv run pytest` |
 
-## 6. Lint, format and typecheck
+## 7. Lint, format and typecheck
 
 | Task | Docker (repository root) | Host (uv, in `apps/api/`) |
 | --- | --- | --- |
@@ -115,7 +125,7 @@ One command. The isolation tests run against the configured database (so tamperi
 | Format (apply) | `docker compose run --rm --user "$(id -u):$(id -g)" -v "$PWD/apps/api:/app" tools ruff format .` | `uv run ruff format .` |
 | Typecheck (mypy strict) | `docker compose run --rm tools mypy` | `uv run mypy` |
 
-## 7. Dependencies
+## 8. Dependencies
 
 Edit `pyproject.toml` and refresh the lock; commit both.
 
@@ -139,6 +149,7 @@ apps/api/
     services/        business rules (empty for now)
     repositories/    data access (empty for now)
     seed.py          development seed (fake data, refuses production)
+    posture.py       `python -m app.posture`; db/posture.py holds the checks
   migrations/        Alembic (roles, tables, row level security); env.py uses AdminSettings
   tests/
   Dockerfile         multi-stage, non-root user; compose builds the `dev` target
