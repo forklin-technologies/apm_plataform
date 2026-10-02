@@ -7,6 +7,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.db.posture import cheap_posture_ok
 from app.db.session import get_db
 from app.schemas.health import HealthResponse, ReadinessResponse
 
@@ -29,8 +30,14 @@ def health() -> HealthResponse:
 def ready(db: Annotated[Session, Depends(get_db)]) -> ReadinessResponse | JSONResponse:
     try:
         db.execute(text("SELECT 1"))
+        posture_ok = cheap_posture_ok(db.connection())
     except SQLAlchemyError:
         logger.warning("readiness check failed: database unavailable", exc_info=True)
+        posture_ok = False
+    else:
+        if not posture_ok:
+            logger.error("readiness check failed: the database role is not the unprivileged one")
+    if not posture_ok:
         return JSONResponse(
             status_code=503,
             content=ReadinessResponse(status="unavailable").model_dump(),

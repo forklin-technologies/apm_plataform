@@ -67,8 +67,29 @@ def _apply_on_begin(
         apply_tenant_context(connection, context)
 
 
+class TenantContextConflict(RuntimeError):
+    """A session that already acts for a tenant was asked to act for another one (or too late)."""
+
+
 def bind_tenant(session: Session, context: TenantContext) -> None:
-    """Make every transaction of this session run with `context`."""
+    """Make every transaction of this session run with `context`.
+
+    A session is bound to ONE tenant context for its whole life. Binding the same context again is
+    a no-op; binding a different one raises, whatever the transaction state (including inside a
+    SAVEPOINT). Otherwise the session could believe it acts for tenant B while the database still
+    runs the transaction as tenant A (the setting is applied once per transaction, and a rolled
+    back SAVEPOINT would undo a setting applied inside it), and the identity map could end up
+    holding objects of two tenants. Use a new session for another tenant.
+    """
+    bound = session.info.get(_CONTEXT_KEY)
+    if bound is not None:
+        if bound != context:
+            raise TenantContextConflict("this session is already bound to another tenant context")
+        return
+    if session.in_nested_transaction():
+        # Applied inside a SAVEPOINT, the setting would vanish if the savepoint rolled back while
+        # the session still believed it was bound.
+        raise TenantContextConflict("bind the tenant context before opening a savepoint")
     session.info[_CONTEXT_KEY] = context
     if not session.info.get(_LISTENER_KEY):
         session.info[_LISTENER_KEY] = True

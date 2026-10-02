@@ -29,6 +29,7 @@ FRAGMENT_LENGTH = 5
 
 DRIVER_MESSAGE = "must start with postgresql+psycopg://"
 HINT_MESSAGE = "percent-encoded in the password"
+QUERY_MESSAGE = "must not set user or password in the query string"
 
 
 def leaked_fragments(text: str, secret: str) -> list[str]:
@@ -120,6 +121,29 @@ URL_CASES: list[tuple[str, str | None, str, str, str]] = [
         "postgresql+psycopg://apm:@[PWDTOKEN]@db:5432/apm",
         "@[PWDTOKEN]",
         HINT_MESSAGE,
+    ),
+    # The driver lets a query parameter override the URL's user/password: `?user=apm` would connect
+    # as another role than the one the role checks look at (review N6).
+    (
+        "user-in-query",
+        "production",
+        f"postgresql+psycopg://apm_app:{PASSWORD}@db:5432/apm?user=apm",
+        PASSWORD,
+        QUERY_MESSAGE,
+    ),
+    (
+        "user-in-query-uppercase",
+        "production",
+        f"postgresql+psycopg://apm:{PASSWORD}@db:5432/apm?USER=apm_app",
+        PASSWORD,
+        QUERY_MESSAGE,
+    ),
+    (
+        "password-in-query",
+        "production",
+        f"postgresql+psycopg://apm_app@db:5432/apm?password={PASSWORD}",
+        PASSWORD,
+        QUERY_MESSAGE,
     ),
     (
         "whitespace-in-host",

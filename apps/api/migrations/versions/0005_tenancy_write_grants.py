@@ -23,6 +23,11 @@ Mutable columns, and why:
   memberships:   role, status, updated_at.  These are what an organization admin legitimately
                  changes (promote, suspend, revoke) without touching who the membership is for.
 Which role may change them is decided by the permission matrix in code (TASK-004), not here.
+
+Also (N2): no TEMPORARY privilege on the database for PUBLIC or apm_app. A temporary table lives as
+long as the pooled connection and shadows a real table for whoever puts pg_temp first in the
+search_path, so letting the application role create them is a way to plant state for the next
+user of a connection. The pool also runs DISCARD ALL when a connection is returned (app/db/session).
 """
 
 from collections.abc import Sequence
@@ -42,6 +47,16 @@ MUTABLE_COLUMNS = {
 
 
 def upgrade() -> None:
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            EXECUTE format('REVOKE TEMPORARY ON DATABASE %I FROM PUBLIC', current_database());
+            EXECUTE format('REVOKE TEMPORARY ON DATABASE %I FROM apm_app', current_database());
+        END
+        $$
+        """
+    )
     op.execute("SET LOCAL ROLE apm_owner")
     op.execute("REVOKE INSERT ON memberships FROM apm_app")
     for table, columns in MUTABLE_COLUMNS.items():
@@ -59,3 +74,12 @@ def downgrade() -> None:
         op.execute(f"GRANT UPDATE ON {table} TO apm_app")
     op.execute("GRANT INSERT ON memberships TO apm_app")
     op.execute("RESET ROLE")
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            EXECUTE format('GRANT TEMPORARY ON DATABASE %I TO PUBLIC', current_database());
+        END
+        $$
+        """
+    )
