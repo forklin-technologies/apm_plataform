@@ -120,10 +120,12 @@ for (const width of [320, 360]) {
         const lineHeight = parseFloat(style.lineHeight) || mirror.getBoundingClientRect().height / lines;
         const textareaLines = Math.round((textarea.scrollHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)) / lineHeight);
         mirror.remove();
-        return { cut, lines, textareaLines, value: textarea.value, overflowX: textarea.scrollWidth - textarea.clientWidth };
+        return { cut, lines, textareaLines, value: textarea.value, overflowX: textarea.scrollWidth - textarea.clientWidth, clippedY: textarea.scrollHeight - textarea.clientHeight };
       });
       expect(result.cut, `quebra no meio de palavra: ${result.value}`).toEqual([]);
       expect(result.overflowX).toBeLessThanOrEqual(0);
+      // nenhuma linha escondida: a caixa tem a altura de todo o texto (sem rolagem vertical interna)
+      expect(result.clippedY, "linhas do payload escondidas na caixa").toBeLessThanOrEqual(1);
       // o espelho reproduz a quebra real da textarea (sanidade da medicao)
       expect(Math.abs(result.lines - result.textareaLines)).toBeLessThanOrEqual(1);
     });

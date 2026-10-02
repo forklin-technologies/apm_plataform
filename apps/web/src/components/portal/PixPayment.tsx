@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { CheckIcon, ClockIcon, CopyIcon, InfoIcon, RefreshIcon } from "@/components/ui/icons";
 import { api } from "@/lib/api";
@@ -46,6 +46,23 @@ export function PixPayment({ slug, charge: initial, onNewCharge, onRestart, fetc
   const copyTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => () => clearTimeout(copyTimer.current), []);
+
+  // A caixa do codigo cresce com o texto: em telas estreitas o payload ocupa mais linhas e nenhuma
+  // pode ficar escondida (a quebra e entre palavras, nunca no meio de VALOR).
+  const hasCode = status === "PENDING" || status === null;
+  useLayoutEffect(() => {
+    const el = codeRef.current;
+    if (!el || !hasCode) return;
+    const fit = () => {
+      el.style.height = "auto";
+      el.style.height = `${el.scrollHeight + (el.offsetHeight - el.clientHeight)}px`;
+    };
+    fit();
+    if (typeof ResizeObserver === "undefined" || !el.parentElement) return;
+    const observer = new ResizeObserver(fit);
+    observer.observe(el.parentElement); // a largura do contêiner muda a quebra de linha
+    return () => observer.disconnect();
+  }, [charge.payload, hasCode]);
 
   // Ao abrir o passo Pix, o foco vai para o titulo.
   useEffect(() => {
