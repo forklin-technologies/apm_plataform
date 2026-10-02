@@ -241,13 +241,19 @@ def _create_ledger() -> None:
         "CREATE INDEX ix_financial_transactions_organization_id "
         "ON financial_transactions (organization_id)",
         "CREATE UNIQUE INDEX uq_financial_transactions_one_active_reimbursement "
-        "ON financial_transactions (parent_transaction_id) "
+        "ON financial_transactions (school_id, parent_transaction_id) "
         "WHERE kind = 'REIMBURSEMENT' AND status IN ('PENDING', 'PAID')",
     ):
         op.execute(statement)
 
 
 def _create_details() -> None:
+    # The primary key of a detail is (transaction_id, organization_id, school_id), not the
+    # transaction id alone. The composite foreign key to the ledger already ties the three
+    # together, so there is still one detail per transaction; but a primary key on the id alone
+    # would answer "this id has a detail" (duplicate key) BEFORE the foreign key refuses an id of
+    # another tenant, which is the existence oracle of M1. The same rule holds for every unique
+    # index the application can feed: it carries the school (tests/financial/test_references.py).
     op.execute(
         f"""
         CREATE TABLE contributions (
@@ -262,12 +268,9 @@ def _create_details() -> None:
             receipt_token_hash text,
             receipt_expires_at timestamptz,
             {TIMESTAMPS},
-            CONSTRAINT pk_contributions PRIMARY KEY (transaction_id),
+            CONSTRAINT pk_contributions PRIMARY KEY (transaction_id, organization_id, school_id),
             {_tenant_fks("contributions")},
             {_detail_fk("contributions", "CONTRIBUTION")},
-            -- Target of pix_charges.
-            CONSTRAINT uq_contributions_transaction_id_organization_id_school_id
-                UNIQUE (transaction_id, organization_id, school_id),
             -- Global on purpose: the token is a 128-bit secret stored only as a hash, so a clash
             -- reveals nothing, and resolve_receipt (ADR-016) looks it up without a tenant.
             CONSTRAINT uq_contributions_receipt_token_hash UNIQUE (receipt_token_hash),
@@ -304,15 +307,13 @@ def _create_details() -> None:
             approved_at timestamptz,
             decision_reason text,
             {TIMESTAMPS},
-            CONSTRAINT pk_expenses PRIMARY KEY (transaction_id),
+            CONSTRAINT pk_expenses PRIMARY KEY (transaction_id, organization_id, school_id),
             {_tenant_fks("expenses")},
             {_detail_fk("expenses", "EXPENSE")},
             CONSTRAINT fk_expenses_submitted_by_user_id_users
                 FOREIGN KEY (submitted_by_user_id) REFERENCES users (id) ON DELETE RESTRICT,
             CONSTRAINT fk_expenses_approved_by_user_id_users
                 FOREIGN KEY (approved_by_user_id) REFERENCES users (id) ON DELETE RESTRICT,
-            CONSTRAINT uq_expenses_transaction_id_organization_id_school_id
-                UNIQUE (transaction_id, organization_id, school_id),
             CONSTRAINT ck_expenses_description_length
                 CHECK (length(btrim(description)) BETWEEN 1 AND 500),
             CONSTRAINT ck_expenses_vendor_length
@@ -341,7 +342,7 @@ def _create_details() -> None:
             beneficiary_user_id uuid NOT NULL,
             payment_reference text,
             {TIMESTAMPS},
-            CONSTRAINT pk_reimbursements PRIMARY KEY (transaction_id),
+            CONSTRAINT pk_reimbursements PRIMARY KEY (transaction_id, organization_id, school_id),
             {_tenant_fks("reimbursements")},
             {_detail_fk("reimbursements", "REIMBURSEMENT")},
             CONSTRAINT fk_reimbursements_beneficiary_user_id_users
@@ -366,7 +367,7 @@ def _create_details() -> None:
             reason text NOT NULL,
             payment_reference text,
             {TIMESTAMPS},
-            CONSTRAINT pk_refunds PRIMARY KEY (transaction_id),
+            CONSTRAINT pk_refunds PRIMARY KEY (transaction_id, organization_id, school_id),
             {_tenant_fks("refunds")},
             {_detail_fk("refunds", "REFUND")},
             CONSTRAINT ck_refunds_reason_length CHECK (length(btrim(reason)) BETWEEN 3 AND 500),
@@ -399,7 +400,8 @@ def _create_details() -> None:
                 ON DELETE RESTRICT,
             CONSTRAINT fk_expense_attachments_uploaded_by_user_id_users
                 FOREIGN KEY (uploaded_by_user_id) REFERENCES users (id) ON DELETE RESTRICT,
-            CONSTRAINT uq_expense_attachments_transaction_id_sha256 UNIQUE (transaction_id, sha256),
+            CONSTRAINT uq_expense_attachments_school_id_transaction_id_sha256
+                UNIQUE (school_id, transaction_id, sha256),
             CONSTRAINT ck_expense_attachments_storage_key_length
                 CHECK (length(storage_key) BETWEEN 1 AND 500 AND storage_key !~ '^/'),
             CONSTRAINT ck_expense_attachments_file_name_length
@@ -466,7 +468,7 @@ def _create_pix_and_webhooks() -> None:
     )
     op.execute(
         "CREATE UNIQUE INDEX uq_pix_charges_one_pending_per_contribution "
-        "ON pix_charges (transaction_id) WHERE status = 'PENDING'"
+        "ON pix_charges (school_id, transaction_id) WHERE status = 'PENDING'"
     )
     op.execute("CREATE INDEX ix_pix_charges_transaction_id ON pix_charges (transaction_id)")
     op.execute("CREATE INDEX ix_pix_charges_school_id ON pix_charges (school_id)")

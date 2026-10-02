@@ -145,6 +145,7 @@ class FinancialTransaction(ScopeMixin, TimestampMixin, Base):
         Index("ix_financial_transactions_organization_id", "organization_id"),
         Index(
             "uq_financial_transactions_one_active_reimbursement",
+            "school_id",
             "parent_transaction_id",
             unique=True,
             postgresql_where=text("kind = 'REIMBURSEMENT' AND status IN ('PENDING', 'PAID')"),
@@ -184,12 +185,6 @@ class Contribution(ScopeMixin, TimestampMixin, Base):
     __table_args__ = (
         *scope_constraints("contributions"),
         detail_fk("contributions"),
-        UniqueConstraint(
-            "transaction_id",
-            "organization_id",
-            "school_id",
-            name="uq_contributions_transaction_id_organization_id_school_id",
-        ),
         UniqueConstraint("receipt_token_hash", name="uq_contributions_receipt_token_hash"),
         CheckConstraint("kind = 'CONTRIBUTION'", name="kind"),
         CheckConstraint("method IN ('PIX', 'CASH')", name="method_valid"),
@@ -218,6 +213,8 @@ class Contribution(ScopeMixin, TimestampMixin, Base):
     )
 
     transaction_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    school_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     kind: Mapped[str] = mapped_column(Text, server_default=text("'CONTRIBUTION'"))
     method: Mapped[str] = mapped_column(Text)
     # Personal data of a child's family: only when the school enables it, never public. They can
@@ -237,12 +234,6 @@ class Expense(ScopeMixin, TimestampMixin, Base):
         detail_fk("expenses"),
         user_fk("expenses", "submitted_by_user_id"),
         user_fk("expenses", "approved_by_user_id"),
-        UniqueConstraint(
-            "transaction_id",
-            "organization_id",
-            "school_id",
-            name="uq_expenses_transaction_id_organization_id_school_id",
-        ),
         CheckConstraint("kind = 'EXPENSE'", name="kind"),
         CheckConstraint("length(btrim(description)) BETWEEN 1 AND 500", name="description_length"),
         CheckConstraint(
@@ -266,6 +257,8 @@ class Expense(ScopeMixin, TimestampMixin, Base):
     )
 
     transaction_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    school_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     kind: Mapped[str] = mapped_column(Text, server_default=text("'EXPENSE'"))
     description: Mapped[str] = mapped_column(Text)
     vendor: Mapped[str | None] = mapped_column(Text)
@@ -297,6 +290,8 @@ class Reimbursement(ScopeMixin, TimestampMixin, Base):
     )
 
     transaction_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    school_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     kind: Mapped[str] = mapped_column(Text, server_default=text("'REIMBURSEMENT'"))
     beneficiary_user_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     payment_reference: Mapped[str | None] = mapped_column(Text)
@@ -319,6 +314,8 @@ class Refund(ScopeMixin, TimestampMixin, Base):
     )
 
     transaction_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    organization_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
+    school_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     kind: Mapped[str] = mapped_column(Text, server_default=text("'REFUND'"))
     reason: Mapped[str] = mapped_column(Text)
     payment_reference: Mapped[str | None] = mapped_column(Text)
@@ -338,7 +335,10 @@ class ExpenseAttachment(ScopeMixin, TimestampMixin, Base):
         ),
         user_fk("expense_attachments", "uploaded_by_user_id"),
         UniqueConstraint(
-            "transaction_id", "sha256", name="uq_expense_attachments_transaction_id_sha256"
+            "school_id",
+            "transaction_id",
+            "sha256",
+            name="uq_expense_attachments_school_id_transaction_id_sha256",
         ),
         CheckConstraint(
             "length(storage_key) BETWEEN 1 AND 500 AND storage_key !~ '^/'",

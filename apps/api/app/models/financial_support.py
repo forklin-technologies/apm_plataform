@@ -165,6 +165,7 @@ class PixCharge(ScopeMixin, TimestampMixin, Base):
         ),
         Index(
             "uq_pix_charges_one_pending_per_contribution",
+            "school_id",
             "transaction_id",
             unique=True,
             postgresql_where=text("status = 'PENDING'"),
