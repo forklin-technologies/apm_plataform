@@ -35,7 +35,7 @@ export function ApiStatusChip({
         : "bg-neutral-soft text-ink-2";
 
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+    <div className={`flex min-h-11 items-center gap-x-2 ${showDetail ? "flex-wrap gap-y-1" : "flex-nowrap"}`}>
       <span
         role="status"
         aria-live="polite"
@@ -54,10 +54,11 @@ export function ApiStatusChip({
         <button
           type="button"
           onClick={status.refresh}
-          className="inline-flex min-h-11 items-center gap-1.5 rounded-full px-3 text-foot font-semibold text-accent-ink hover:bg-neutral-soft"
+          className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-full px-3 text-foot font-semibold text-accent-ink hover:bg-neutral-soft"
         >
           <RefreshIcon size={16} />
-          Tentar de novo
+          {/* so o icone em telas bem estreitas: o chip e o botao cabem sempre na mesma linha */}
+          <span className="max-[419px]:sr-only">Tentar de novo</span>
         </button>
       )}
     </div>

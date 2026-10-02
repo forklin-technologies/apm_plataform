@@ -245,20 +245,22 @@ export function PainelShell({ organizations, initialSchoolId, initialData, secti
         aria-label="Seções do painel"
         className="bar-material fixed inset-x-0 bottom-0 z-30 border-t border-line pb-[env(safe-area-inset-bottom)] lg:hidden"
       >
-        <ul className="mx-auto grid max-w-xl grid-cols-5">
+        {/* flex-auto: cada aba ocupa a largura do proprio rotulo mais uma fatia da sobra, entao nenhum
+            rotulo (nem o mais longo) e truncado de 320px para cima. */}
+        <ul className="mx-auto flex max-w-xl">
           {NAV_ITEMS.map((item) => {
             const current = item.section === section;
             return (
-              <li key={item.section}>
+              <li key={item.section} className="flex-auto">
                 <Link
                   href={item.href}
                   aria-current={current ? "page" : undefined}
-                  className={`flex min-h-[3.5rem] flex-col items-center justify-center gap-0.5 px-0.5 text-tab font-medium ${current ? "text-ink" : "text-ink-2"}`}
+                  className={`flex min-h-[3.5rem] flex-col items-center justify-center gap-0.5 px-0.5 text-tab font-medium max-[339px]:text-[0.625rem] ${current ? "text-ink" : "text-ink-2"}`}
                 >
                   <span className={`grid h-7 w-12 place-items-center rounded-full transition-colors ${current ? "bg-neutral-soft" : ""}`}>
                     {item.icon}
                   </span>
-                  <span className="max-w-full truncate">{item.label}</span>
+                  <span className="whitespace-nowrap">{item.label}</span>
                 </Link>
               </li>
             );

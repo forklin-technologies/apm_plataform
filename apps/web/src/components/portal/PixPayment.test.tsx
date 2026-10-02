@@ -9,7 +9,7 @@ const base: PixCharge = {
   token: "tok_test_000000000001",
   status: "PENDING",
   amountCents: 12000,
-  payload: "PROTOTIPO.NAO-E-PIX.NAO-PAGUE.tok_test_000000000001.VALOR-12000-CENTAVOS",
+  payload: "PROTOTIPO-NAO-E-PIX-NAO-PAGUE-tok_test_000000000001-VALOR-12000-CENTAVOS",
   createdAt: new Date(NOW).toISOString(),
   expiresAt: new Date(NOW + 10 * 60 * 1000).toISOString(),
   paidAt: null,
@@ -149,7 +149,7 @@ describe("PixPayment: copia e cola e marcacao de prototipo", () => {
     expect(screen.getByText(/Pix de exemplo para demonstração/)).toBeInTheDocument();
     expect(screen.getByRole("img", { name: /QR Code de exemplo.*Não é um Pix real/ })).toBeInTheDocument();
     const code = screen.getByLabelText("Pix copia e cola") as HTMLTextAreaElement;
-    expect(code.value).toMatch(/^PROTOTIPO\.NAO-E-PIX/);
+    expect(code.value).toMatch(/^PROTOTIPO-NAO-E-PIX/);
     expect(code.value).not.toMatch(/^000201/);
     expect(code.readOnly).toBe(true);
   });

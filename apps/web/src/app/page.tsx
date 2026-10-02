@@ -43,7 +43,9 @@ export default async function HomePage() {
 
   return (
     <div className="paper-grid min-h-dvh">
-      <header className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-x-6 gap-y-3 px-5 pb-2 pt-5 sm:px-8 sm:pt-7">
+      {/* Cabecalho de altura fixa: no celular o chip tem a propria linha (reservada), entao a API fora do ar
+            ou voltando nunca empurra o titulo. */}
+      <header className="mx-auto flex w-full max-w-6xl flex-col gap-1 px-5 pb-2 pt-5 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-8 sm:pt-7">
         <Wordmark />
         <ApiStatusChip />
       </header>

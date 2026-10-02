@@ -96,8 +96,10 @@ function toCharge(order: StoredOrder, now: number): PixCharge {
     token: order.token,
     status,
     amountCents: order.amountCents,
-    // Texto OBVIAMENTE falso: nao tem o prefixo EMV do Pix, nenhum app de banco o reconhece.
-    payload: `PROTOTIPO.NAO-E-PIX.NAO-PAGUE.${order.token}.VALOR-${order.amountCents}-CENTAVOS`,
+    // Texto OBVIAMENTE falso: nao tem o prefixo EMV do Pix, nenhum app de banco o reconhece. Separado
+    // por hifens (pontos de quebra naturais): em telas estreitas a linha quebra entre as palavras e
+    // nunca no meio de "VALOR" ou "CENTAVOS".
+    payload: `PROTOTIPO-NAO-E-PIX-NAO-PAGUE-${order.token}-VALOR-${order.amountCents}-CENTAVOS`,
     createdAt: new Date(order.createdAtMs).toISOString(),
     expiresAt: new Date(order.expiresAtMs).toISOString(),
     paidAt: status === "PAID" ? new Date(order.payAtMs).toISOString() : null,

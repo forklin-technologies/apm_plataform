@@ -17,11 +17,12 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 export function Indicators({ summary }: { summary: DashboardSummary }) {
   return (
     <section aria-labelledby="indicators-title" className="rounded-[var(--r-lg)] bg-surface shadow-[0_0_0_1px_var(--line)]">
-      <div className="px-5 pb-5 pt-6 sm:px-6">
+      {/* @container: o numero escala com a largura do cartao (cqw), entao nunca estoura a 320px. */}
+      <div className="@container px-5 pb-5 pt-6 sm:px-6">
         <h2 id="indicators-title" className="text-sub text-ink-2">
           Saldo de {summary.periodLabel.split(" de ")[0]?.toLowerCase()}
         </h2>
-        <p className="mt-1.5 text-[3rem] font-bold leading-none tracking-[-0.045em] text-ink sm:text-[3.5rem]">
+        <p className="mt-1.5 text-[min(3.5rem,14cqw)] font-bold leading-none tracking-[-0.045em] text-ink">
           {formatBRL(summary.balanceCents)}
         </p>
         <p className="mt-2 max-w-[44ch] text-foot text-ink-2">

@@ -36,10 +36,19 @@ describe("mock de contribuicao e Pix", () => {
     expect(charge.status).toBe("PENDING");
     expect(charge.amountCents).toBe(20000);
     expect(Number.isInteger(charge.amountCents)).toBe(true);
-    expect(charge.payload).toMatch(/^PROTOTIPO\.NAO-E-PIX\.NAO-PAGUE\./);
+    expect(charge.payload).toMatch(/^PROTOTIPO-NAO-E-PIX-NAO-PAGUE-/);
     expect(charge.payload).not.toMatch(/000201|br\.gov\.bcb/i);
     expect(charge.paidAt).toBeNull();
     expect(new Date(charge.expiresAt).getTime() - new Date(charge.createdAt).getTime()).toBe(CHARGE_TTL_MS);
+  });
+
+  it("N5: o payload so tem unidades curtas entre hifens, entao quebra entre palavras em 320px", async () => {
+    const charge = await createQuota();
+    const units = charge.payload.split("-");
+    expect(units.slice(0, 5)).toEqual(["PROTOTIPO", "NAO", "E", "PIX", "NAO"]);
+    expect(units).toContain("VALOR");
+    expect(units).toContain("CENTAVOS");
+    for (const unit of units) expect(unit.length).toBeLessThanOrEqual(24);
   });
 
   it("o status so muda para PAID quando a camada de dados decide (apos o atraso)", async () => {

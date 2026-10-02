@@ -38,7 +38,8 @@
   --accent-contrast: #ffffff;
   --accent-ink: var(--ink);
 
-  --bar: rgb(255 255 255 / 0.72);
+  /* Alpha de base >= 0,9: se o WebKit nao desfocar (WKWebView, portal), nada colide por baixo. */
+  --bar: rgb(255 255 255 / 0.92);
   --shadow-float: 0 1px 2px rgb(16 20 28 / 0.06), 0 12px 32px -8px rgb(16 20 28 / 0.18);
   --shadow-sheet: 0 1px 1px rgb(16 20 28 / 0.05), 0 10px 28px -10px rgb(16 20 28 / 0.22);
 
@@ -87,7 +88,7 @@
     --accent: #f1f3f6;
     --accent-contrast: #0f1115;
 
-    --bar: rgb(26 29 35 / 0.72);
+    --bar: rgb(26 29 35 / 0.92);
     --shadow-float: 0 1px 2px rgb(0 0 0 / 0.4), 0 14px 36px -8px rgb(0 0 0 / 0.65);
     --shadow-sheet: 0 1px 1px rgb(0 0 0 / 0.4), 0 12px 30px -10px rgb(0 0 0 / 0.7);
   }
@@ -224,6 +225,13 @@
   @supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
     .bar-material {
       background: var(--surface);
+    }
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .bar-material {
+      background: var(--surface);
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
     }
   }
 
