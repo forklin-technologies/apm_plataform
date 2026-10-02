@@ -24,6 +24,7 @@ export function ErrorView({ reset, digest }: { reset: () => void; digest?: strin
         <div className="mt-8 flex flex-col gap-3 sm:flex-row">
           <Button onClick={reset}>Tentar de novo</Button>
           {/* <a> e nao <Link>: um erro pode deixar o roteador num estado ruim; recarregar limpa tudo. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
           <a href="/" className={buttonClass("secondary", "lg")}>
             Ir para o início
           </a>
