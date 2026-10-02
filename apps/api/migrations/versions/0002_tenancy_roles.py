@@ -6,6 +6,17 @@ Create Date: 2026-10-01
 
 Roles are cluster-wide, not per database, so every statement here is idempotent and the
 downgrade only drops a role when nothing else in the cluster depends on it.
+
+Who runs it. The admin (DATABASE_ADMIN_URL) is either a superuser (the development compose) or, in
+a managed service, a role with CREATEROLE that owns the database but is NOT a superuser. PostgreSQL
+16 lets such a role create and administer the roles it created, but NOT set the privileged
+attributes SUPERUSER, BYPASSRLS, REPLICATION or CREATEDB, not even to their default. So:
+  - the roles are created with the default attributes (which are the safe ones);
+  - the privileged attributes are re-asserted ONLY when the admin is a superuser;
+  - every attribute is then VERIFIED from pg_roles, and a mismatch fails the migration with a
+    clear message (a cluster administrator has to fix the role) instead of going on silently.
+Re-running this revision is the only thing that repairs or detects a tampered role: `alembic
+upgrade head` at head runs nothing. The unprivileged check at runtime is app/db/posture.py.
 """
 
 from collections.abc import Sequence
@@ -54,6 +65,56 @@ def _set_app_password() -> None:
         raise RuntimeError("could not set the password of the apm_app role") from None
 
 
+# A non-superuser admin that did not create the roles has no ADMIN OPTION on them, and every ALTER
+# ROLE / GRANT below fails for it: that error is turned into this message.
+CANNOT_ADMINISTER = (
+    "the admin role cannot administer the roles apm_app and apm_owner (it did not create them and "
+    "lacks ADMIN OPTION on them): run the migration as a superuser, or as the role that created them"
+)
+FIX_HINT = "a cluster administrator must correct them with ALTER ROLE, then run the migration again"
+
+# Shared by the checks: collects `problems` for the attributes that only a superuser can change.
+_PRIVILEGED_PROBLEMS = """
+    FOR r IN
+        SELECT rolname, rolsuper, rolbypassrls, rolreplication, rolcreatedb
+        FROM pg_catalog.pg_roles WHERE rolname IN ('apm_owner', 'apm_app')
+    LOOP
+        IF r.rolsuper THEN problems := problems || ' ' || r.rolname || ' has SUPERUSER;'; END IF;
+        IF r.rolbypassrls THEN problems := problems || ' ' || r.rolname || ' has BYPASSRLS;'; END IF;
+        IF r.rolreplication THEN problems := problems || ' ' || r.rolname || ' has REPLICATION;'; END IF;
+        IF r.rolcreatedb THEN problems := problems || ' ' || r.rolname || ' has CREATEDB;'; END IF;
+    END LOOP;
+"""
+_OTHER_PROBLEMS = """
+    FOR r IN
+        SELECT rolname, rolcreaterole, rolcanlogin, rolinherit
+        FROM pg_catalog.pg_roles WHERE rolname IN ('apm_owner', 'apm_app')
+    LOOP
+        IF r.rolcreaterole THEN problems := problems || ' ' || r.rolname || ' has CREATEROLE;'; END IF;
+        IF r.rolname = 'apm_owner' AND r.rolcanlogin THEN problems := problems || ' apm_owner has LOGIN;'; END IF;
+        IF r.rolname = 'apm_app' AND NOT r.rolcanlogin THEN problems := problems || ' apm_app has NOLOGIN;'; END IF;
+        IF r.rolname = 'apm_app' AND r.rolinherit THEN problems := problems || ' apm_app has INHERIT;'; END IF;
+    END LOOP;
+"""
+
+
+def _verification(checks: str) -> str:
+    return f"""
+        DO $$
+        DECLARE
+            r record;
+            problems text := '';
+        BEGIN
+            {checks}
+            IF problems <> '' THEN
+                RAISE EXCEPTION 'the roles apm_app/apm_owner have unexpected attributes (%): {FIX_HINT}',
+                    btrim(problems) USING ERRCODE = 'insufficient_privilege';
+            END IF;
+        END
+        $$
+        """
+
+
 def upgrade() -> None:
     op.execute(
         """
@@ -65,23 +126,53 @@ def upgrade() -> None:
             IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = 'apm_app') THEN
                 CREATE ROLE apm_app LOGIN;
             END IF;
+            -- Only a superuser may set SUPERUSER, BYPASSRLS, REPLICATION or CREATEDB, even to
+            -- "off". Anyone else gets the defaults of CREATE ROLE, which are the safe values, and
+            -- the check below turns anything else into a clear failure.
+            IF current_setting('is_superuser') = 'on' THEN
+                ALTER ROLE apm_owner NOSUPERUSER NOCREATEDB NOREPLICATION NOBYPASSRLS;
+                ALTER ROLE apm_app NOSUPERUSER NOCREATEDB NOREPLICATION NOBYPASSRLS;
+            END IF;
+        EXCEPTION WHEN insufficient_privilege THEN
+            RAISE EXCEPTION 'the admin role cannot create or administer the roles apm_app and '
+                'apm_owner: it needs CREATEROLE (or to be a superuser)'
+                USING ERRCODE = 'insufficient_privilege';
         END
         $$
         """
     )
-    # Reassert the attributes on every run: a role that was tampered with is fixed by upgrading.
+    op.execute(_verification(_PRIVILEGED_PROBLEMS))
+    # The attributes a role with CREATEROLE may set (and so repair).
     op.execute(
-        "ALTER ROLE apm_owner NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS"
+        f"""
+        DO $$
+        BEGIN
+            ALTER ROLE apm_owner NOLOGIN;
+            ALTER ROLE apm_app LOGIN NOINHERIT NOCREATEROLE;
+        EXCEPTION WHEN insufficient_privilege THEN
+            RAISE EXCEPTION '{CANNOT_ADMINISTER}' USING ERRCODE = 'insufficient_privilege';
+        END
+        $$
+        """
     )
-    op.execute(
-        "ALTER ROLE apm_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION "
-        "NOBYPASSRLS NOINHERIT"
-    )
+    op.execute(_verification(_PRIVILEGED_PROBLEMS + _OTHER_PROBLEMS))
     op.execute("ALTER ROLE apm_app SET search_path = public")
     _set_app_password()
     # The admin runs DDL as apm_owner (SET ROLE), so the tables belong to a role that is not a
     # superuser and FORCE ROW LEVEL SECURITY applies to their owner.
-    op.execute("GRANT apm_owner TO CURRENT_USER")
+    op.execute(
+        f"""
+        DO $$
+        BEGIN
+            IF NOT pg_has_role(current_user, 'apm_owner', 'SET') THEN
+                GRANT apm_owner TO CURRENT_USER;
+            END IF;
+        EXCEPTION WHEN insufficient_privilege THEN
+            RAISE EXCEPTION '{CANNOT_ADMINISTER}' USING ERRCODE = 'insufficient_privilege';
+        END
+        $$
+        """
+    )
     op.execute(
         """
         DO $$
@@ -143,10 +234,17 @@ def downgrade() -> None:
             LOOP
                 IF EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = role_name) THEN
                     BEGIN
-                        EXECUTE format('DROP OWNED BY %I', role_name);
+                        BEGIN
+                            EXECUTE format('DROP OWNED BY %I', role_name);
+                        EXCEPTION WHEN insufficient_privilege THEN
+                            NULL;  -- an admin without the role's privileges owns nothing to drop here
+                        END;
                         EXECUTE format('DROP ROLE %I', role_name);
-                    EXCEPTION WHEN dependent_objects_still_exist THEN
-                        RAISE NOTICE 'role % is used by another database, keeping it', role_name;
+                    EXCEPTION
+                        WHEN dependent_objects_still_exist THEN
+                            RAISE NOTICE 'role % is used by another database, keeping it', role_name;
+                        WHEN insufficient_privilege THEN
+                            RAISE NOTICE 'the admin role cannot drop role %, keeping it', role_name;
                     END;
                 END IF;
             END LOOP;

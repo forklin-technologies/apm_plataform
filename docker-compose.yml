@@ -65,14 +65,38 @@ services:
       retries: 10
       start_period: 5s
 
-  # Not started by `up`. Usage: docker compose run --rm tools <command> (pytest, alembic, python -m app.seed).
+  # A second, throwaway Postgres cluster: no published port, data in memory, not started by `up`.
+  # Only the tests use it, for what cannot be checked in the main cluster: running the migrations
+  # as a CREATEROLE admin that is NOT a superuser (the managed-service case) in a cluster where the
+  # roles do not exist yet (review H1).
+  db-clean:
+    image: postgres:16
+    profiles: ["tools"]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?copy .env.example to .env}
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 3s
+
+  # Not started by `up`. Usage: docker compose run --rm tools <command>
+  # (pytest, alembic, python -m app.seed, python -m app.posture).
   tools:
     build: *api-build
     profiles: ["tools"]
-    environment: *tool-env
+    environment:
+      <<: *tool-env
+      CLEAN_CLUSTER_URL: postgresql+psycopg://postgres:${POSTGRES_PASSWORD:?copy .env.example to .env}@db-clean:5432/postgres
     command: ["python", "-c", "print('usage: docker compose run --rm tools <command>')"]
     depends_on:
       db:
+        condition: service_healthy
+      db-clean:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
