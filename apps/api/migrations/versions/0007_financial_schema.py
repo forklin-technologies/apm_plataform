@@ -1010,6 +1010,8 @@ $body$
 """
 
 # --- statement (cash basis) ------------------------------------------------------------------
+# The join to expenses is restricted to the school (e.school_id = p_school): without it the planner
+# may read the whole expenses table, of every school, to compute an opening balance.
 # CASH = settled and, for an expense, paid by the APM: an expense paid by a collaborator moves the
 # cash only through its reimbursement. Signed amount: IN positive, OUT negative. The window is
 # [p_from 00:00, p_to + 1 day 00:00) in the time zone of the school.
@@ -1034,7 +1036,7 @@ LANGUAGE sql STABLE SECURITY INVOKER SET search_path = pg_catalog AS $body$
     opening AS (
         SELECT coalesce(sum(CASE f.direction WHEN 'IN' THEN f.amount_cents ELSE -f.amount_cents END), 0)::bigint AS amount
         FROM win, public.financial_transactions f
-        LEFT JOIN public.expenses e ON e.transaction_id = f.id
+        LEFT JOIN public.expenses e ON e.transaction_id = f.id AND e.school_id = p_school
         WHERE f.school_id = p_school AND f.settled_at IS NOT NULL AND f.settled_at < win.t0
           AND (f.kind <> 'EXPENSE' OR e.paid_by = 'APM')
     ),
@@ -1044,7 +1046,7 @@ LANGUAGE sql STABLE SECURITY INVOKER SET search_path = pg_catalog AS $body$
                (CASE f.direction WHEN 'IN' THEN f.amount_cents ELSE -f.amount_cents END)::bigint AS signed,
                f.late_adjustment
         FROM win, public.financial_transactions f
-        LEFT JOIN public.expenses e ON e.transaction_id = f.id
+        LEFT JOIN public.expenses e ON e.transaction_id = f.id AND e.school_id = p_school
         WHERE f.school_id = p_school AND f.settled_at >= win.t0 AND f.settled_at < win.t1
           AND (f.kind <> 'EXPENSE' OR e.paid_by = 'APM')
     )
@@ -1069,7 +1071,7 @@ LANGUAGE sql STABLE SECURITY INVOKER SET search_path = pg_catalog AS $body$
     cash AS (
         SELECT f.settled_at, f.direction, f.amount_cents
         FROM win, public.financial_transactions f
-        LEFT JOIN public.expenses e ON e.transaction_id = f.id
+        LEFT JOIN public.expenses e ON e.transaction_id = f.id AND e.school_id = p_school
         WHERE f.school_id = p_school AND f.settled_at IS NOT NULL AND f.settled_at < win.t1
           AND (f.kind <> 'EXPENSE' OR e.paid_by = 'APM')
     ),
@@ -1102,7 +1104,7 @@ LANGUAGE sql STABLE SECURITY INVOKER SET search_path = pg_catalog AS $body$
                 ELSE 'PAYABLE' END,
            f.occurred_at
     FROM public.financial_transactions f
-    LEFT JOIN public.expenses e ON e.transaction_id = f.id
+    LEFT JOIN public.expenses e ON e.transaction_id = f.id AND e.school_id = p_school
     WHERE f.school_id = p_school AND f.settled_at IS NULL AND (
         (f.kind = 'CONTRIBUTION' AND f.status = 'PENDING_PAYMENT')
         OR (f.kind = 'EXPENSE' AND (f.status = 'SUBMITTED'
