@@ -10,6 +10,7 @@ export function PaidStamp({ animate = false, size = 112 }: { animate?: boolean; 
   return (
     <div
       aria-hidden="true"
+      data-testid="paid-stamp"
       className={animate ? "stamp" : "-rotate-[8deg]"}
       style={{ width: size, height: size, color: "var(--ok)" }}
     >
@@ -17,32 +18,32 @@ export function PaidStamp({ animate = false, size = 112 }: { animate?: boolean; 
         {animate && (
           <circle
             className="stamp-ripple"
+            data-decorative="true"
             cx="60"
             cy="60"
             r="50"
             stroke="currentColor"
             strokeWidth="2"
-            style={{ transformOrigin: "60px 60px" }}
           />
         )}
         <circle
+          data-part="ring"
           className={animate ? "stamp-ring" : undefined}
           cx="60"
           cy="60"
           r="52"
           stroke="currentColor"
           strokeWidth="3.5"
-          pathLength={1}
         />
         <circle cx="60" cy="60" r="44" stroke="currentColor" strokeWidth="1.2" strokeDasharray="2 5" opacity=".7" />
         <path
+          data-part="check"
           className={animate ? "stamp-check" : undefined}
           d="M38 62l14 14 30-33"
           stroke="currentColor"
           strokeWidth="7"
           strokeLinecap="round"
           strokeLinejoin="round"
-          pathLength={1}
         />
       </svg>
     </div>

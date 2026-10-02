@@ -301,7 +301,11 @@
     animation: pop 320ms var(--spring);
   }
 
-  /* Carimbo (o unico momento orquestrado: confirmacao do pagamento). Estado base = desenho final. */
+  /*
+   * Carimbo (o unico momento orquestrado: confirmacao do pagamento). Estado base = desenho final.
+   * Anel e check ENTRAM por escala (nunca por tracado com stroke-dashoffset, que sumiria o desenho
+   * se a animacao congelasse): em qualquer ponto da animacao, inclusive t=0, o simbolo esta visivel.
+   */
   @keyframes stamp-in {
     from {
       transform: scale(1.7) rotate(-18deg);
@@ -309,12 +313,12 @@
   }
   @keyframes stamp-ring {
     from {
-      stroke-dashoffset: 1;
+      transform: scale(0.86);
     }
   }
   @keyframes stamp-check {
     from {
-      stroke-dashoffset: 1;
+      transform: scale(0.55);
     }
   }
   @keyframes stamp-ripple {
@@ -332,20 +336,22 @@
   }
   .stamp-ring,
   .stamp-check {
-    stroke-dasharray: 1;
-    stroke-dashoffset: 0;
+    transform-box: fill-box;
+    transform-origin: center;
   }
   .stamp-ripple {
-    opacity: 0;
+    transform-box: fill-box;
+    transform-origin: center;
+    opacity: 0; /* decorativo: so existe durante a animacao */
   }
   [data-motion="on"] .stamp {
     animation: stamp-in 620ms var(--spring);
   }
   [data-motion="on"] .stamp-ring {
-    animation: stamp-ring 520ms var(--ease-out) 60ms backwards;
+    animation: stamp-ring 520ms var(--spring) 60ms;
   }
   [data-motion="on"] .stamp-check {
-    animation: stamp-check 380ms var(--ease-out) 360ms backwards;
+    animation: stamp-check 480ms var(--spring) 260ms;
   }
   [data-motion="on"] .stamp-ripple {
     animation: stamp-ripple 900ms var(--ease-out) 280ms;
