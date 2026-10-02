@@ -1,15 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { isPlausibleSlug, isPlausibleToken } from "./token";
+import { randomToken } from "@/mocks/util";
+import { DEMO_RECEIPT_TOKEN, MIN_TOKEN_LENGTH, isPlausibleSlug, isPlausibleToken } from "./token";
 
 describe("isPlausibleToken", () => {
-  it("aceita tokens seguros para URL", () => {
-    for (const ok of ["demo-comprovante-0001", "teste1", "AbC_123-xyz", "a".repeat(64)]) {
+  it("o comprimento minimo corresponde a 128 bits em base64url (22 caracteres)", () => {
+    expect(MIN_TOKEN_LENGTH).toBe(22);
+    expect(Math.ceil((128 / 6))).toBe(22);
+  });
+
+  it("aceita tokens de 22 a 64 caracteres seguros para URL e o link de exemplo", () => {
+    for (const ok of [DEMO_RECEIPT_TOKEN, "A".repeat(22), "AbC_123-xyz_AbC_123-xyz_", "a".repeat(64), randomToken()]) {
       expect(isPlausibleToken(ok)).toBe(true);
     }
   });
 
-  it("recusa formatos perigosos ou fora do tamanho", () => {
-    for (const bad of ["", "abc", "a".repeat(65), "../etc/passwd", "a b c d", "<script>", "tok%20en", "tok/en1", "tök3n"]) {
+  it("recusa formatos curtos, longos ou perigosos", () => {
+    for (const bad of ["", "abc", "teste1", "a".repeat(21), "a".repeat(65), "../etc/passwd", "a b c d e f g h i j k l", "<script>alert(1)</script>", "tok%20en".repeat(4), "tok/en1".repeat(4), "tök3n".repeat(5), "demo-comprovante-0002"]) {
       expect(isPlausibleToken(bad)).toBe(false);
     }
   });

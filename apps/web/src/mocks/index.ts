@@ -12,5 +12,4 @@ export const mockDataSource: DataSource = {
   dashboard: mockDashboard,
 };
 
-/** Token de exemplo para o link "Comprovante de exemplo" (o mock devolve um comprovante fixo). */
-export const DEMO_RECEIPT_TOKEN = "demo-comprovante-0001";
+export { DEMO_RECEIPT_TOKEN } from "@/lib/api/token";

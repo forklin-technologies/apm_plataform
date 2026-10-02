@@ -3,7 +3,7 @@
  * decidiria a partir do webhook do banco): depois de PAY_DELAY_MS o "banco" confirma. A tela
  * so consulta (polling) e exibe.
  */
-import { isPlausibleToken } from "@/lib/api/token";
+import { DEMO_RECEIPT_TOKEN, isPlausibleToken } from "@/lib/api/token";
 import type {
   ApiResult,
   ContributionsApi,
@@ -20,6 +20,8 @@ import { delay, hashString, randomToken, readSession, writeSession } from "./uti
 
 export const PAY_DELAY_MS = 8_000;
 export const CHARGE_TTL_MS = 10 * 60 * 1000;
+/** Pedidos do mock (dado de crianca!) somem do navegador depois disso, mesmo sem abrir o comprovante. */
+export const ORDER_TTL_MS = 30 * 60 * 1000;
 const STORE_KEY = "apm-proto:orders";
 
 interface StoredOrder {
@@ -36,10 +38,29 @@ interface StoredOrder {
 
 const memory = new Map<string, StoredOrder>();
 
+const isExpired = (order: StoredOrder, now: number) => now - order.createdAtMs >= ORDER_TTL_MS;
+
+/** Remove da memoria e do sessionStorage os pedidos que passaram do TTL. */
+function purgeExpired(now: number): Record<string, StoredOrder> {
+  for (const [token, order] of memory) if (isExpired(order, now)) memory.delete(token);
+  const all = readSession<Record<string, StoredOrder>>(STORE_KEY, {});
+  let changed = false;
+  for (const [token, order] of Object.entries(all)) {
+    if (isExpired(order, now)) {
+      delete all[token];
+      changed = true;
+    }
+  }
+  if (changed) writeSession(STORE_KEY, all);
+  return all;
+}
+
 function load(token: string): StoredOrder | null {
+  const now = Date.now();
+  const all = purgeExpired(now);
   const inMemory = memory.get(token);
   if (inMemory) return inMemory;
-  const stored = readSession<Record<string, StoredOrder>>(STORE_KEY, {})[token];
+  const stored = all[token];
   if (stored) {
     memory.set(token, stored);
     return stored;
@@ -49,7 +70,7 @@ function load(token: string): StoredOrder | null {
 
 function save(order: StoredOrder): void {
   memory.set(order.token, order);
-  const all = readSession<Record<string, StoredOrder>>(STORE_KEY, {});
+  const all = purgeExpired(Date.now());
   all[order.token] = order;
   writeSession(STORE_KEY, all);
 }
@@ -91,7 +112,8 @@ function receiptNumber(token: string): string {
   return `2026-${String(hashString(token) % 1_000_000).padStart(6, "0")}`;
 }
 
-function deterministicReceipt(school: PublicSchool, token: string): Receipt {
+/** Comprovante FIXO do link de exemplo (so o DEMO_RECEIPT_TOKEN o usa). Exportado para teste. */
+export function sampleReceipt(school: PublicSchool, token: string): Receipt {
   const h = hashString(token);
   const quota = school.quotas[h % school.quotas.length];
   const identification: IdentificationValues = {};
@@ -194,7 +216,16 @@ export const mockContributions: ContributionsApi = {
         },
       };
     }
-    // Token que o mock nao conhece (por exemplo, link de exemplo): comprovante deterministico.
-    return { ok: true, data: deterministicReceipt(school, token) };
+    // So o link de exemplo tem comprovante fixo. Qualquer outro token que o mock nao conhece e
+    // "nao encontrado", sem diferenciar "nunca existiu" de "ainda nao existe".
+    if (token === DEMO_RECEIPT_TOKEN) return { ok: true, data: sampleReceipt(school, token) };
+    return fail("not-found", 404);
+  },
+
+  async clearPersonalData(slug, token) {
+    const order = isPlausibleToken(token) ? load(token) : null;
+    if (!order || order.slug !== slug) return;
+    // Mantem so o que nao e dado pessoal (valor, data, status) ate o TTL, para o link seguir abrindo.
+    save({ ...order, identification: {} });
   },
 };

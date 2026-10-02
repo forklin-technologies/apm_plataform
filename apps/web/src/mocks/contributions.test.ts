@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CHARGE_TTL_MS, PAY_DELAY_MS, mockContributions, resetMockOrders } from "./contributions";
+import { DEMO_RECEIPT_TOKEN } from "@/lib/api/token";
+import { CHARGE_TTL_MS, ORDER_TTL_MS, PAY_DELAY_MS, mockContributions, resetMockOrders, sampleReceipt } from "./contributions";
+import { SCHOOLS } from "./fixtures";
 
 // A latencia simulada nao importa aqui; o relogio e controlado pelos fake timers.
 vi.mock("./util", async (importOriginal) => ({
@@ -88,27 +90,76 @@ describe("mock de contribuicao e Pix", () => {
     expect(after.ok && after.data.amountCents).toBe(20000);
   });
 
-  it("token desconhecido e plausivel devolve comprovante de exemplo deterministico", async () => {
-    const a = await mockContributions.getReceipt("escola-exemplo", "demo-comprovante-0001");
-    const b = await mockContributions.getReceipt("escola-exemplo", "demo-comprovante-0001");
+  it("N1: SO o token de exemplo tem comprovante fixo; qualquer outro token desconhecido e 'nao encontrado'", async () => {
+    const a = await mockContributions.getReceipt("escola-exemplo", DEMO_RECEIPT_TOKEN);
+    const b = await mockContributions.getReceipt("escola-exemplo", DEMO_RECEIPT_TOKEN);
     expect(a).toEqual(b);
     expect(a.ok && a.data.status).toBe("PAID");
+    for (const unknown of ["AbCdEfGhIjKlMnOpQrStUv", "a".repeat(22), "demo-comprovante-0002", "x".repeat(64)]) {
+      expect(await mockContributions.getReceipt("escola-exemplo", unknown)).toEqual({
+        ok: false,
+        error: { kind: "not-found", status: 404 },
+      });
+    }
   });
 
-  it("comprovante de exemplo traz todos os campos visiveis da escola, para qualquer token", async () => {
-    for (let i = 0; i < 200; i += 1) {
-      const result = await mockContributions.getReceipt("escola-exemplo", `demo-token-${i}-xyz`);
-      if (!result.ok) throw new Error("falhou");
-      expect(result.data.identification.guardianName).toBeTruthy();
-      expect(result.data.identification.studentName).toBeTruthy();
-      expect(result.data.identification.classroom).toBeTruthy();
+  it("N1: nao diferencia 'nunca existiu' de 'ainda nao existe': mesma resposta e mesma forma", async () => {
+    const charge = await createQuota(); // existe, mas em OUTRA escola
+    const wrongSchool = await mockContributions.getReceipt("escola-horizonte", charge.token);
+    const neverExisted = await mockContributions.getReceipt("escola-horizonte", "zzzzzzzzzzzzzzzzzzzzzz");
+    expect(wrongSchool).toEqual(neverExisted);
+  });
+
+  it("o comprovante de exemplo traz todos os campos visiveis da escola (regressao do indice com sinal)", () => {
+    const school = SCHOOLS.find((x) => x.slug === "escola-exemplo")!;
+    for (let i = 0; i < 300; i += 1) {
+      const receipt = sampleReceipt(school, `demo-token-${i}-xyz`);
+      expect(receipt.identification.guardianName).toBeTruthy();
+      expect(receipt.identification.studentName).toBeTruthy();
+      expect(receipt.identification.classroom).toBeTruthy();
     }
-    const horizonte = await mockContributions.getReceipt("escola-horizonte", "demo-comprovante-0001");
-    expect(horizonte.ok && horizonte.data.identification).not.toHaveProperty("classroom");
+    const horizonte = SCHOOLS.find((x) => x.slug === "escola-horizonte")!;
+    expect(sampleReceipt(horizonte, DEMO_RECEIPT_TOKEN).identification).not.toHaveProperty("classroom");
+  });
+
+  it("N8: clearPersonalData apaga nomes e turma do navegador, mas o comprovante segue abrindo sem eles", async () => {
+    const charge = await createQuota();
+    vi.advanceTimersByTime(PAY_DELAY_MS);
+    const before = await mockContributions.getReceipt("escola-exemplo", charge.token);
+    expect(before.ok && before.data.identification.guardianName).toBe("Ana Lima");
+    expect(window.sessionStorage.getItem("apm-proto:orders")).toContain("Ana Lima");
+
+    await mockContributions.clearPersonalData("escola-exemplo", charge.token);
+
+    const raw = window.sessionStorage.getItem("apm-proto:orders") ?? "";
+    expect(raw).not.toContain("Ana Lima");
+    expect(raw).not.toContain("Davi Lima");
+    const after = await mockContributions.getReceipt("escola-exemplo", charge.token);
+    expect(after.ok && after.data.identification).toEqual({});
+    expect(after.ok && after.data.amountCents).toBe(20000);
+  });
+
+  it("N8: o pedido some do navegador apos o TTL curto, mesmo sem abrir o comprovante", async () => {
+    const charge = await createQuota();
+    expect(window.sessionStorage.getItem("apm-proto:orders")).toContain("Ana Lima");
+    vi.advanceTimersByTime(ORDER_TTL_MS - 1000);
+    expect((await mockContributions.getCharge("escola-exemplo", charge.token)).ok).toBe(true);
+    vi.advanceTimersByTime(1000);
+    expect(await mockContributions.getCharge("escola-exemplo", charge.token)).toEqual({
+      ok: false,
+      error: { kind: "not-found", status: 404 },
+    });
+    expect(window.sessionStorage.getItem("apm-proto:orders") ?? "").not.toContain("Ana Lima");
+  });
+
+  it("N11: o token gerado tem 22 caracteres base64url e e aceito pelo formato", async () => {
+    const charge = await createQuota();
+    expect(charge.token).toMatch(/^[A-Za-z0-9_-]{22}$/);
   });
 
   it("rejeita token mal formado e escola inexistente", async () => {
     expect((await mockContributions.getReceipt("escola-exemplo", "../etc/passwd")).ok).toBe(false);
-    expect((await mockContributions.getReceipt("nao-existe", "demo-comprovante-0001")).ok).toBe(false);
+    expect((await mockContributions.getReceipt("escola-exemplo", "curto")).ok).toBe(false);
+    expect((await mockContributions.getReceipt("nao-existe", DEMO_RECEIPT_TOKEN)).ok).toBe(false);
   });
 });

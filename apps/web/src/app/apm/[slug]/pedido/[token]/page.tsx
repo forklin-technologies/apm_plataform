@@ -21,12 +21,17 @@ export default async function ReceiptPage({ params }: Props) {
     api.schools.getPublicSchool(slug),
     api.contributions.getReceipt(slug, token),
   ]);
-  // Mesma resposta para escola ou pedido inexistente: sem enumeracao.
-  if (!school.ok || !receipt.ok) notFound();
+  if (!school.ok) notFound();
+
+  // O servidor SO afirma o que a camada de dados confirma AQUI. Se ela nao conhece o token no
+  // servidor (no protótipo, os pedidos moram no navegador), o HTML sai NEUTRO, sem "Pago" e sem
+  // dado de pessoa, e quem responde e a camada de dados no cliente: comprovante, "ainda nao
+  // confirmado" ou a mesma 404 estilizada. Com um backend real, o servidor ja devolveria o 404.
+  const initial = receipt.ok ? receipt.data : null;
 
   return (
     <PortalShell school={school.data}>
-      <ReceiptView slug={slug} token={token} initial={receipt.data} />
+      <ReceiptView slug={slug} token={token} initial={initial} />
     </PortalShell>
   );
 }

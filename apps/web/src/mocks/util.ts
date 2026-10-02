@@ -10,14 +10,16 @@ export function delay(ms: number): Promise<void> {
 
 export { hashString } from "@/lib/hash";
 
-const TOKEN_ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789";
-
-export function randomToken(length = 20): string {
-  const bytes = new Uint8Array(length);
+/**
+ * Token de 128 bits (16 bytes de crypto.getRandomValues) em base64url: 22 caracteres.
+ * Sem modulo sobre o alfabeto (cada 6 bits viram um simbolo), portanto sem vies.
+ */
+export function randomToken(): string {
+  const bytes = new Uint8Array(16);
   globalThis.crypto.getRandomValues(bytes);
-  let out = "";
-  for (const byte of bytes) out += TOKEN_ALPHABET[byte % TOKEN_ALPHABET.length];
-  return out;
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 export function readSession<T>(key: string, fallback: T): T {

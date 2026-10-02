@@ -17,6 +17,6 @@ export const api: DataSource & { health: { ready: typeof getReadiness } } = {
   ...mockDataSource,
 };
 
-export { DEMO_RECEIPT_TOKEN } from "@/mocks";
+export { DEMO_RECEIPT_TOKEN } from "./token";
 export type { DataSource } from "./types";
 export * from "./types";

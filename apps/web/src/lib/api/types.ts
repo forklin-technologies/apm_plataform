@@ -151,6 +151,12 @@ export interface ContributionsApi {
   create(input: CreateContributionInput): Promise<ApiResult<{ charge: PixCharge }>>;
   getCharge(slug: string, token: string): Promise<ApiResult<PixCharge>>;
   getReceipt(slug: string, token: string): Promise<ApiResult<Receipt>>;
+  /**
+   * So no protótipo: apaga do navegador os dados pessoais (responsável, aluno e turma) guardados
+   * pelo mock, depois que o comprovante foi mostrado. O backend real guarda tudo no servidor e o
+   * navegador nunca retém dado pessoal.
+   */
+  clearPersonalData(slug: string, token: string): Promise<void>;
 }
 
 export interface DashboardApi {
