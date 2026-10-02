@@ -55,6 +55,7 @@ export function IdentificationStep({
 
   return (
     <form
+      method="post"
       ref={formRef}
       noValidate
       onSubmit={(e) => {
@@ -78,6 +79,11 @@ export function IdentificationStep({
             label={FIELD_LABELS[field]}
             optional={school.identification[field] === "OPTIONAL"}
             autoComplete={AUTOCOMPLETE[field]}
+            // Dado de crianca: sem corretor ortografico (que manda o texto a servicos externos em alguns
+            // navegadores) e sem historico de autopreenchimento para aluno e turma.
+            spellCheck={false}
+            autoCorrect="off"
+            autoCapitalize="words"
             placeholder={PLACEHOLDERS[field]}
             maxLength={80}
             value={values[field] ?? ""}

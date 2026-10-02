@@ -12,12 +12,13 @@ export function LoginForm() {
   const [showPassword, setShowPassword] = useState(false);
   return (
     <form
+      method="post"
       noValidate
       onSubmit={(event) => event.preventDefault()}
       aria-describedby="login-unavailable"
       className="mt-6 space-y-5 rounded-[var(--r-lg)] bg-surface p-5 shadow-[0_0_0_1px_var(--line)] sm:p-6"
     >
-      <TextField label="E-mail" name="email" type="email" inputMode="email" autoComplete="username" placeholder="voce@escola.com.br" />
+      <TextField label="E-mail" name="email" type="email" inputMode="email" autoComplete="username" spellCheck={false} autoCapitalize="none" autoCorrect="off" placeholder="voce@escola.com.br" />
       <div>
         <TextField
           label="Senha"
