@@ -11,8 +11,11 @@ DATABASE_URL_HINT = (
     f"expected {DATABASE_URL_PREFIX}USER:PASSWORD@HOST:PORT/DBNAME, "
     "with special characters (@ : / ? #) percent-encoded in the password"
 )
-# Query parameters that would override the credentials written in the URL itself.
-FORBIDDEN_QUERY_KEYS = frozenset({"user", "password"})
+# The ONLY query parameters a database URL may carry (an allow-list: a deny-list always misses a
+# key). The driver turns every query parameter into a libpq connection option, so anything else
+# (user, password, host, hostaddr, dbname, service, passfile, options="-c row_security=off", ...)
+# could override what the URL says, or what the checks below verified, at connect time.
+ALLOWED_QUERY_KEYS = ("sslmode", "sslrootcert", "connect_timeout", "application_name")
 # The Postgres role the application connects as (see docs/tenancy.md).
 APP_DB_ROLE = "apm_app"
 
@@ -39,10 +42,11 @@ def validate_database_url(url: str, name: str) -> None:
         raise ValueError(f"{name} is not valid: {DATABASE_URL_HINT}") from None
     if any(char.isspace() for char in parsed.host or ""):
         raise ValueError(f"{name} is not valid: {DATABASE_URL_HINT}")
-    # The driver lets a query parameter override the user (and password) of the URL, so `?user=apm`
-    # would connect as another role than the one the role checks below look at.
-    if any(str(key).lower() in FORBIDDEN_QUERY_KEYS for key in parsed.query):
-        raise ValueError(f"{name} must not set user or password in the query string")
+    # Exact, case-sensitive match, and no repeated key (a repeated key is a tuple of values).
+    query = parsed.query.items()
+    if any(key not in ALLOWED_QUERY_KEYS or not isinstance(value, str) for key, value in query):
+        allowed = ", ".join(ALLOWED_QUERY_KEYS)
+        raise ValueError(f"{name} may only use these query parameters, each once: {allowed}")
 
 
 class Settings(BaseSettings):
@@ -93,7 +97,7 @@ class AdminSettings(Settings):
 
     @model_validator(mode="after")
     def _check_roles(self) -> Self:
-        # make_url(...).username IS the effective user: a `user` query parameter was rejected above.
+        # make_url(...).username IS the effective user: no query parameter can override it (above).
         app_user = make_url(self.database_url.get_secret_value()).username
         admin_user = make_url(self.database_admin_url.get_secret_value()).username
         if app_user != APP_DB_ROLE:

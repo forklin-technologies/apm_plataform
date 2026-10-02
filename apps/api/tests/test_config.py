@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy.engine import make_url
 
-from app.core.config import Settings, get_settings
+from app.core.config import ALLOWED_QUERY_KEYS, AdminSettings, Settings, get_settings
 
 VALID_URL = "postgresql+psycopg://user:s3cret@db:5432/apm"
 
@@ -96,3 +96,106 @@ def test_accepts_a_legitimate_query_string(monkeypatch: pytest.MonkeyPatch) -> N
     settings = Settings(_env_file=None)  # type: ignore[call-arg]
 
     assert make_url(settings.database_url.get_secret_value()).query == {"sslmode": "require"}
+
+
+# --- the query string is an ALLOW-list (review N6) ---------------------------------------------
+
+ALLOWED_KEYS = {
+    "sslmode": "require",
+    "sslrootcert": "/etc/ssl/certs/ca.pem",
+    "connect_timeout": "5",
+    "application_name": "apm-api",
+}
+# Every libpq option that could change who connects, where, to what, or how the session behaves.
+REFUSED_KEYS = [
+    "user",
+    "password",
+    "host",
+    "hostaddr",
+    "port",
+    "dbname",
+    "service",
+    "passfile",
+    "options",
+    "sslpassword",
+    "sslcert",
+    "sslkey",
+    "target_session_attrs",
+    "channel_binding",
+    "krbsrvname",
+    "gssencmode",
+    "client_encoding",
+    "fallback_application_name",
+    "keepalives",
+    "replication",
+]
+
+
+def _url_with(query: str) -> str:
+    return f"postgresql+psycopg://apm_app:okPw0@db:5432/apm?{query}"
+
+
+def _settings_from(monkeypatch: pytest.MonkeyPatch, url: str) -> Settings:
+    monkeypatch.setenv("ENV", "development")
+    monkeypatch.setenv("DATABASE_URL", url)
+    return Settings(_env_file=None)  # type: ignore[call-arg]
+
+
+@pytest.mark.parametrize("key", sorted(ALLOWED_KEYS))
+def test_each_allowed_query_key_is_accepted(monkeypatch: pytest.MonkeyPatch, key: str) -> None:
+    settings = _settings_from(monkeypatch, _url_with(f"{key}={ALLOWED_KEYS[key]}"))
+
+    assert make_url(settings.database_url.get_secret_value()).query == {key: ALLOWED_KEYS[key]}
+
+
+def test_all_the_allowed_query_keys_together_are_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+    query = "&".join(f"{k}={v}" for k, v in ALLOWED_KEYS.items())
+
+    settings = _settings_from(monkeypatch, _url_with(query))
+
+    assert dict(make_url(settings.database_url.get_secret_value()).query) == ALLOWED_KEYS
+
+
+def test_the_allow_list_is_exactly_these_four() -> None:
+    assert ALLOWED_QUERY_KEYS == ("sslmode", "sslrootcert", "connect_timeout", "application_name")
+
+
+@pytest.mark.parametrize("variable", ["DATABASE_URL", "DATABASE_ADMIN_URL"])
+@pytest.mark.parametrize(
+    "variant",
+    ["lower", "upper", "title"],
+)
+@pytest.mark.parametrize("key", REFUSED_KEYS)
+def test_every_other_query_key_is_refused_in_any_case_with_a_fixed_message(
+    monkeypatch: pytest.MonkeyPatch, variable: str, variant: str, key: str
+) -> None:
+    spelled = {"lower": key.lower(), "upper": key.upper(), "title": key.title()}[variant]
+    value = "VALUE_CANARY_9"
+    monkeypatch.setenv("ENV", "development")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://apm_app:okPw0@db:5432/apm")
+    monkeypatch.setenv("DATABASE_ADMIN_URL", "postgresql+psycopg://apm:okPw1@db:5432/apm")
+    monkeypatch.setenv(variable, f"postgresql+psycopg://x:okPw2@db:5432/apm?{spelled}={value}")
+
+    with pytest.raises(ValidationError) as error:
+        AdminSettings(_env_file=None)  # type: ignore[call-arg]
+
+    message = str(error.value)
+    assert "may only use these query parameters" in message
+    assert value not in message and spelled not in message.replace("query parameters", "")
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "options=-c%20row_security%3Doff",
+        "options=-c%20search_path%3Dpg_temp",
+        "sslmode=require&options=-c%20role%3Dapm_owner",
+        "sslmode=require&sslmode=disable",
+        "user=apm&user=apm_app",
+        "application_name=a&application_name=b",
+        "connect_timeout=1&connect_timeout=999",
+    ],
+)
+def test_options_and_repeated_keys_are_refused(monkeypatch: pytest.MonkeyPatch, query: str) -> None:
+    with pytest.raises(ValidationError, match="may only use these query parameters"):
+        _settings_from(monkeypatch, _url_with(query))

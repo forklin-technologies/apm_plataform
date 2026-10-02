@@ -29,7 +29,7 @@ FRAGMENT_LENGTH = 5
 
 DRIVER_MESSAGE = "must start with postgresql+psycopg://"
 HINT_MESSAGE = "percent-encoded in the password"
-QUERY_MESSAGE = "must not set user or password in the query string"
+QUERY_MESSAGE = "may only use these query parameters, each once: sslmode, sslrootcert"
 
 
 def leaked_fragments(text: str, secret: str) -> list[str]:
@@ -122,8 +122,8 @@ URL_CASES: list[tuple[str, str | None, str, str, str]] = [
         "@[PWDTOKEN]",
         HINT_MESSAGE,
     ),
-    # The driver lets a query parameter override the URL's user/password: `?user=apm` would connect
-    # as another role than the one the role checks look at (review N6).
+    # The driver turns every query parameter into a libpq option, so anything outside the allow-list
+    # could override the credentials or the session settings the checks looked at (review N6).
     (
         "user-in-query",
         "production",
@@ -142,6 +142,41 @@ URL_CASES: list[tuple[str, str | None, str, str, str]] = [
         "password-in-query",
         "production",
         f"postgresql+psycopg://apm_app@db:5432/apm?password={PASSWORD}",
+        PASSWORD,
+        QUERY_MESSAGE,
+    ),
+    (
+        "options-row-security-off",
+        "production",
+        f"postgresql+psycopg://apm_app:{PASSWORD}@db:5432/apm?options=-c%20row_security%3Doff",
+        PASSWORD,
+        QUERY_MESSAGE,
+    ),
+    (
+        "host-in-query",
+        "production",
+        f"postgresql+psycopg://apm_app:{PASSWORD}@db:5432/apm?host=evil.example",
+        PASSWORD,
+        QUERY_MESSAGE,
+    ),
+    (
+        "allowed-key-in-another-case",
+        "production",
+        f"postgresql+psycopg://apm_app:{PASSWORD}@db:5432/apm?SSLMODE=disable",
+        PASSWORD,
+        QUERY_MESSAGE,
+    ),
+    (
+        "allowed-key-twice",
+        "production",
+        f"postgresql+psycopg://apm_app:{PASSWORD}@db:5432/apm?sslmode=require&sslmode=disable",
+        PASSWORD,
+        QUERY_MESSAGE,
+    ),
+    (
+        "unknown-key-next-to-an-allowed-one",
+        "production",
+        f"postgresql+psycopg://apm_app:{PASSWORD}@db:5432/apm?sslmode=require&dbname=postgres",
         PASSWORD,
         QUERY_MESSAGE,
     ),
