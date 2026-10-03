@@ -21,10 +21,19 @@ def csrf_token(secret: SecretStr, session_id: bytes) -> str:
     return b64url(keyed_digest(secret, "csrf", session_id))
 
 
+def _same(left: str, right: str) -> bool:
+    """Constant-time equality of two header or cookie values. Compared as BYTES: `compare_digest`
+    raises TypeError on a str with a non-ASCII character, and a client can send one."""
+    try:
+        return hmac.compare_digest(left.encode("utf-8"), right.encode("utf-8"))
+    except UnicodeEncodeError:
+        return False
+
+
 def csrf_is_valid(request: Request, secret: SecretStr, session_id: bytes, cookie_name: str) -> bool:
     header = request.headers.get(CSRF_HEADER)
     cookie = request.cookies.get(cookie_name)
     if not header or not cookie:
         return False
     expected = csrf_token(secret, session_id)
-    return hmac.compare_digest(header, cookie) and hmac.compare_digest(header, expected)
+    return _same(header, cookie) and _same(header, expected)

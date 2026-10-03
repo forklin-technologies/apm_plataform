@@ -1,9 +1,9 @@
 import re
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator
 
 _EMAIL = re.compile(r"^[^@\s]+@[^@\s]+$")
 Role = Literal["organization_admin", "school_admin", "treasurer", "staff", "viewer"]
@@ -15,6 +15,25 @@ class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+def _storable(value: str) -> str:
+    """Text a database can store and a driver can encode: PostgreSQL refuses a NUL byte in text and
+    the driver cannot encode a lone surrogate, and either would otherwise surface as a 500. The
+    message is fixed: it never quotes the value (it may be a password)."""
+    if "\x00" in value:
+        raise ValueError("contains a NUL byte")
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ValueError("contains an invalid character") from None
+    return value
+
+
+# EVERY text field of an authentication request goes through `_storable`, whether it reaches the
+# database (e-mail, name) or only a hash (passwords): one rule, no field to forget.
+Text = Annotated[str, AfterValidator(_storable)]
+PasswordText = Annotated[str, Field(max_length=256), AfterValidator(_storable)]
+
+
 def _email(value: str) -> str:
     value = value.strip().lower()
     if len(value) > 254 or not _EMAIL.fullmatch(value):
@@ -23,8 +42,8 @@ def _email(value: str) -> str:
 
 
 class LoginRequest(Strict):
-    email: str
-    password: str = Field(max_length=256)
+    email: Text
+    password: PasswordText
 
     @field_validator("email")
     @classmethod
@@ -37,12 +56,12 @@ class ContextRequest(Strict):
 
 
 class PasswordRequest(Strict):
-    current_password: str = Field(max_length=256)
-    new_password: str = Field(max_length=256)
+    current_password: PasswordText
+    new_password: PasswordText
 
 
 class InvitationRequest(Strict):
-    email: str
+    email: Text
     role: Role
     school_id: uuid.UUID | None = None
 
@@ -53,9 +72,9 @@ class InvitationRequest(Strict):
 
 
 class AcceptInvitationRequest(Strict):
-    token: str = Field(max_length=200)
-    full_name: str | None = Field(default=None, max_length=200)
-    password: str | None = Field(default=None, max_length=256)
+    token: Annotated[str, Field(max_length=200), AfterValidator(_storable)]
+    full_name: Annotated[str, Field(max_length=200), AfterValidator(_storable)] | None = None
+    password: PasswordText | None = None
 
 
 class UserOut(BaseModel):
