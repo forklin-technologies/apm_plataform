@@ -253,10 +253,12 @@ def _owner_objects() -> None:
         f"CREATE POLICY sessions_update ON sessions FOR UPDATE USING {OWN_SESSION} WITH CHECK {OWN_SESSION}"
     )
     # login_attempts is not tenant data (nobody is logged in yet): only recent rows are visible,
-    # only a "now" row can be written and only an old one can be removed.
+    # only a "now" row can be written and only an old one can be removed. A DELETE with a WHERE also
+    # has to pass the SELECT policy, so the window the application sees (7 days) must be wider than
+    # the age from which a row may be deleted (24 hours); older than 7 days is for an administrator.
     op.execute(
         "CREATE POLICY login_attempts_select ON login_attempts FOR SELECT "
-        "USING (attempted_at > now() - interval '24 hours')"
+        "USING (attempted_at > now() - interval '7 days')"
     )
     op.execute(
         "CREATE POLICY login_attempts_insert ON login_attempts FOR INSERT "

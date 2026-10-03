@@ -17,6 +17,7 @@ ignored; if that setting is wrong, every client behind the proxy shares ONE IP a
 
 import ipaddress
 import math
+import secrets
 from dataclasses import dataclass
 from typing import Any
 
@@ -34,6 +35,8 @@ IP_FAILURES = 20
 IP_WINDOW_SECONDS = 15 * 60
 SUBJECT_FAILURES = 30
 SUBJECT_WINDOW_SECONDS = 60 * 60
+# Chance (in percent) that recording an attempt also purges the old ones.
+PURGE_PERCENT = 5
 
 _PAIR_AGES = text(
     "SELECT EXTRACT(EPOCH FROM (now() - attempted_at))::float8 FROM login_attempts "
@@ -137,10 +140,11 @@ def record_attempt(db: Session, kind: str, keys: AttemptKeys, *, succeeded: bool
         ),
         {"kind": kind, "subject": keys.subject, "ip": keys.ip, "succeeded": succeeded},
     )
-    # Housekeeping: now and then drop what the policy lets the application remove (> a day old).
-    db.execute(
-        text(
-            "DELETE FROM login_attempts "
-            "WHERE attempted_at < now() - interval '24 hours' AND random() < 0.02"
-        )
-    )
+    if secrets.randbelow(100) < PURGE_PERCENT:
+        purge_old_attempts(db)
+
+
+def purge_old_attempts(db: Session) -> None:
+    """Drop the attempts the policy lets the application remove (older than a day). The longest
+    window that matters is an hour, so nothing here changes a decision."""
+    db.execute(text("DELETE FROM login_attempts WHERE attempted_at < now() - interval '24 hours'"))

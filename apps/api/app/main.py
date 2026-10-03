@@ -44,6 +44,7 @@ def create_app(
         openapi_url="/api/openapi.json",
         docs_url=None if settings.is_production else "/api/docs",
         redoc_url=None if settings.is_production else "/api/redoc",
+        swagger_ui_oauth2_redirect_url=None,  # no OAuth here: no extra route outside /api
     )
     app.state.settings = settings
     app.state.session_factory = build_session_factory(engine)
