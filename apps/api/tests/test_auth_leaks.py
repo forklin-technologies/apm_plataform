@@ -305,3 +305,25 @@ def test_a_migration_that_cannot_run_fails_without_echoing_the_password(
     assert real not in saying and real[:12] not in saying and real[-12:] not in saying
     assert admin_settings.database_url.get_secret_value() not in saying
     assert (make_url(scratch_db.app_url).password or "") not in saying
+
+
+# QA finding N10e: SQLAlchemy at DEBUG prints the ROWS a query returns (password hashes, session
+# ids). The app raises the engine loggers to INFO when it builds its engine.
+
+
+def test_starting_the_app_keeps_the_engine_logger_from_printing_result_rows(
+    apis: ApiFactory, caplog: pytest.LogCaptureFixture
+) -> None:
+    # What an operator does to "see the SQL"; caplog puts the levels back at the end of the test.
+    caplog.set_level(logging.DEBUG)
+    caplog.set_level(logging.DEBUG, logger="sqlalchemy.engine")
+    caplog.set_level(logging.DEBUG, logger="sqlalchemy.engine.Engine")
+
+    api = apis.make()
+    with api.client.app.state.session_factory() as session:  # type: ignore[attr-defined]
+        session.execute(text("SELECT upper(CAST(:v AS text))"), {"v": "canary-result-row"})
+
+    assert logging.getLogger("sqlalchemy.engine").getEffectiveLevel() >= logging.INFO
+    assert logging.getLogger("sqlalchemy.engine.Engine").getEffectiveLevel() >= logging.INFO
+    assert "CANARY-RESULT-ROW" not in caplog.text
+    assert "canary-result-row" not in caplog.text

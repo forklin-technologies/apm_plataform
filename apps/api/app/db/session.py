@@ -1,3 +1,4 @@
+import logging
 from collections.abc import Iterator
 from typing import Any
 
@@ -8,6 +9,21 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import Settings
 
 CONNECT_TIMEOUT_SECONDS = 3
+ENGINE_LOGGERS = ("sqlalchemy.engine", "sqlalchemy.engine.Engine")
+
+
+def keep_engine_logging_safe() -> None:
+    """Never let the engine's loggers run below INFO.
+
+    At INFO SQLAlchemy prints the statements, with the parameters hidden (`hide_parameters`). At
+    DEBUG it also prints every ROW a query returns, and those hold password hashes (the login
+    lookup) and session ids. An operator who turns the SQL log up to "see everything" must not be
+    able to put them in the log, so the level is raised when the application builds its engine.
+    """
+    for name in ENGINE_LOGGERS:
+        logger = logging.getLogger(name)
+        if logger.getEffectiveLevel() < logging.INFO:
+            logger.setLevel(logging.INFO)
 
 
 def discard_session_state(dbapi_connection: Any, connection_record: Any) -> None:
@@ -32,6 +48,7 @@ def discard_session_state(dbapi_connection: Any, connection_record: Any) -> None
 
 def build_engine(settings: Settings, **engine_options: Any) -> Engine:
     """Create the engine. It connects lazily, so the API can start with the database down."""
+    keep_engine_logging_safe()
     engine = create_engine(
         settings.database_url.get_secret_value(),
         pool_pre_ping=True,
