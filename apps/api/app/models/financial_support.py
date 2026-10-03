@@ -1,4 +1,4 @@
-"""Support tables of the financial schema: categories, settings, Pix, webhooks, audit, closings."""
+"""Support tables of the financial schema: categories, settings, accounts, Pix, webhooks, audit."""
 
 import uuid
 from datetime import date, datetime
@@ -34,6 +34,11 @@ from app.models.financial_common import (
 from app.models.mixins import TimestampMixin
 
 PROVIDERS = ("BB", "SANDBOX")
+REPORT_GROUPS = ("CONTRIBUTIONS", "OTHER_INCOME", "EXPENSES_REIMBURSEMENTS", "REFUNDS")
+IDENTIFICATION_FIELDS = (
+    "ARRAY['guardian_name', 'contributor_email', 'contributor_phone', 'student_name', "
+    "'class_name']::text[]"
+)
 
 
 class Category(ScopeMixin, TimestampMixin, Base):
@@ -54,6 +59,16 @@ class Category(ScopeMixin, TimestampMixin, Base):
         CheckConstraint("key ~ '^[a-z0-9_]{1,40}$'", name="key_format"),
         CheckConstraint("length(btrim(name)) BETWEEN 1 AND 80", name="name_length"),
         CheckConstraint("applies_to IN ('IN', 'OUT')", name="applies_to_valid"),
+        CheckConstraint(
+            "report_group IN ('CONTRIBUTIONS', 'OTHER_INCOME', "
+            "'EXPENSES_REIMBURSEMENTS', 'REFUNDS')",
+            name="report_group_valid",
+        ),
+        CheckConstraint(
+            "(applies_to = 'IN' AND report_group IN ('CONTRIBUTIONS', 'OTHER_INCOME', 'REFUNDS')) "
+            "OR (applies_to = 'OUT' AND report_group = 'EXPENSES_REIMBURSEMENTS')",
+            name="group_matches_direction",
+        ),
         Index("ix_categories_school_id", "school_id"),
         Index("ix_categories_organization_id", "organization_id"),
     )
@@ -62,6 +77,8 @@ class Category(ScopeMixin, TimestampMixin, Base):
     key: Mapped[str] = mapped_column(Text)
     name: Mapped[str] = mapped_column(Text)
     applies_to: Mapped[str] = mapped_column(Text)
+    # Where the category goes in the monthly report.
+    report_group: Mapped[str] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
 
 
@@ -80,16 +97,19 @@ class SchoolSettings(ScopeMixin, TimestampMixin, Base):
             "AND max_contribution_cents <= 1000000000",
             name="contribution_range",
         ),
+        CheckConstraint(
+            "cardinality(suggested_amounts_cents) BETWEEN 1 AND 6 "
+            "AND array_position(suggested_amounts_cents, NULL) IS NULL "
+            "AND min_contribution_cents <= ALL (suggested_amounts_cents) "
+            "AND max_contribution_cents >= ALL (suggested_amounts_cents)",
+            name="suggested_amounts_valid",
+        ),
         CheckConstraint("pix_expiration_minutes BETWEEN 5 AND 1440", name="pix_expiration_range"),
         CheckConstraint(
-            "identification_mode IN ('ANONYMOUS', 'OPTIONAL', 'REQUIRED')",
-            name="identification_mode_valid",
-        ),
-        CheckConstraint(
-            "required_fields <@ ARRAY['guardian_name', 'student_name', 'class_name']::text[] "
-            "AND (identification_mode <> 'ANONYMOUS' OR cardinality(required_fields) = 0) "
-            "AND (identification_mode <> 'REQUIRED' OR cardinality(required_fields) >= 1)",
-            name="required_fields_valid",
+            f"required_fields <@ {IDENTIFICATION_FIELDS} "
+            f"AND optional_fields <@ {IDENTIFICATION_FIELDS} "
+            "AND NOT (required_fields && optional_fields)",
+            name="identification_fields_valid",
         ),
         CheckConstraint("brand_accent ~ '^#[0-9a-fA-F]{6}$'", name="brand_accent_format"),
         CheckConstraint(
@@ -107,13 +127,77 @@ class SchoolSettings(ScopeMixin, TimestampMixin, Base):
     timezone: Mapped[str] = mapped_column(Text, server_default=text("'America/Sao_Paulo'"))
     min_contribution_cents: Mapped[int] = mapped_column(BigInteger, server_default=text("1000"))
     max_contribution_cents: Mapped[int] = mapped_column(BigInteger, server_default=text("500000"))
+    suggested_amounts_cents: Mapped[list[int]] = mapped_column(
+        ARRAY(BigInteger), server_default=text("'{2000,3000,4000}'")
+    )
+    allow_custom_amount: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     pix_expiration_minutes: Mapped[int] = mapped_column(Integer, server_default=text("30"))
-    identification_mode: Mapped[str] = mapped_column(Text, server_default=text("'OPTIONAL'"))
+    # Which identification fields the public form asks: two lists (anonymous = both empty).
     required_fields: Mapped[list[str]] = mapped_column(ARRAY(Text), server_default=text("'{}'"))
+    optional_fields: Mapped[list[str]] = mapped_column(
+        ARRAY(Text),
+        server_default=text("'{guardian_name,contributor_email,contributor_phone}'"),
+    )
     brand_accent: Mapped[str] = mapped_column(Text, server_default=text("'#0a84ff'"))
     brand_accent_contrast: Mapped[str] = mapped_column(Text, server_default=text("'#ffffff'"))
     # NULL = off. An expense above it needs the organization administrator (rule in the service).
     approval_limit_cents: Mapped[int | None] = mapped_column(BigInteger)
+
+
+class PaymentAccount(ScopeMixin, TimestampMixin, Base):
+    """The receiving account of a school (one ACTIVE). It holds NO credential: secret_ref is only a
+    reference to a secrets manager, and webhook_secret_hash is the SHA-256 of the 128-bit secret of
+    the webhook (a hash, not a credential) that the application role cannot read."""
+
+    __tablename__ = "payment_accounts"
+    __table_args__ = (
+        *scope_constraints("payment_accounts"),
+        # Target of pix_charges (payment_account_id, organization_id, school_id).
+        UniqueConstraint(
+            "id",
+            "organization_id",
+            "school_id",
+            name="uq_payment_accounts_id_organization_id_school_id",
+        ),
+        UniqueConstraint(
+            "school_id",
+            "provider",
+            "external_account_id",
+            name="uq_payment_accounts_school_id_provider_external_account_id",
+        ),
+        # Global for the lookup without a tenant; the hash of a 128-bit secret reveals nothing.
+        UniqueConstraint("webhook_secret_hash", name="uq_payment_accounts_webhook_secret_hash"),
+        CheckConstraint("provider IN ('BB', 'SANDBOX')", name="provider_valid"),
+        CheckConstraint(
+            "length(btrim(external_account_id)) BETWEEN 1 AND 100",
+            name="external_account_id_length",
+        ),
+        CheckConstraint("status IN ('ACTIVE', 'INACTIVE', 'PENDING')", name="status_valid"),
+        CheckConstraint(
+            "secret_ref ~ '^[a-z][a-z0-9_]{1,19}:[A-Za-z0-9_./-]{1,200}$'", name="secret_ref_format"
+        ),
+        CheckConstraint(
+            f"webhook_secret_hash IS NULL OR webhook_secret_hash ~ '{HEX64}'",
+            name="webhook_secret_hash_format",
+        ),
+        Index(
+            "uq_payment_accounts_one_active_per_school",
+            "school_id",
+            unique=True,
+            postgresql_where=text("status = 'ACTIVE'"),
+        ),
+        Index("ix_payment_accounts_school_id", "school_id"),
+    )
+
+    id: Mapped[uuid.UUID] = fin_pk()
+    provider: Mapped[str] = mapped_column(Text)
+    external_account_id: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, server_default=text("'PENDING'"))
+    # "scheme:path" (env:NAME, file:path, vault:path): a reference, never the secret itself.
+    secret_ref: Mapped[str] = mapped_column(Text)
+    # The application role has no SELECT on this column (like users.password_hash): deferred, so
+    # session.get(PaymentAccount, id) works.
+    webhook_secret_hash: Mapped[str | None] = mapped_column(Text, deferred=True)
 
 
 class PixCharge(ScopeMixin, TimestampMixin, Base):
@@ -132,6 +216,16 @@ class PixCharge(ScopeMixin, TimestampMixin, Base):
             name="fk_pix_charges_transaction_id_contributions",
             ondelete="RESTRICT",
         ),
+        ForeignKeyConstraint(
+            ["payment_account_id", "organization_id", "school_id"],
+            [
+                "payment_accounts.id",
+                "payment_accounts.organization_id",
+                "payment_accounts.school_id",
+            ],
+            name="fk_pix_charges_payment_account_id_payment_accounts",
+            ondelete="RESTRICT",
+        ),
         # Per school, never global (a global UNIQUE would be an oracle across tenants).
         UniqueConstraint(
             "school_id", "provider", "txid", name="uq_pix_charges_school_id_provider_txid"
@@ -139,17 +233,35 @@ class PixCharge(ScopeMixin, TimestampMixin, Base):
         CheckConstraint("provider IN ('BB', 'SANDBOX')", name="provider_valid"),
         CheckConstraint("txid ~ '^[A-Za-z0-9]{26,35}$'", name="txid_format"),
         CheckConstraint(
-            "status IN ('PENDING', 'PAID', 'EXPIRED', 'CANCELLED')", name="status_valid"
+            "status IN ('PENDING', 'PAID', 'REVIEW_REQUIRED', 'EXPIRED', 'CANCELLED')",
+            name="status_valid",
         ),
         CheckConstraint("amount_cents > 0 AND amount_cents <= 1000000000000", name="amount_range"),
+        CheckConstraint(
+            "received_amount_cents IS NULL "
+            "OR (received_amount_cents > 0 AND received_amount_cents <= 1000000000000)",
+            name="received_amount_range",
+        ),
         CheckConstraint("expires_at > created_at", name="expires_after_creation"),
         CheckConstraint(
             "end_to_end_id IS NULL OR end_to_end_id ~ '^E[A-Za-z0-9]{31}$'",
             name="end_to_end_id_format",
         ),
         CheckConstraint(
-            "(status = 'PAID') = (end_to_end_id IS NOT NULL AND paid_at IS NOT NULL)",
+            "(status IN ('PAID', 'REVIEW_REQUIRED')) = "
+            "(end_to_end_id IS NOT NULL AND paid_at IS NOT NULL "
+            "AND received_amount_cents IS NOT NULL)",
             name="paid_iff_confirmed",
+        ),
+        CheckConstraint(
+            "(status <> 'PAID' OR received_amount_cents = amount_cents) "
+            "AND (status <> 'REVIEW_REQUIRED' OR (received_amount_cents <> amount_cents "
+            "AND length(btrim(coalesce(divergence_reason, ''))) >= 3))",
+            name="received_matches_status",
+        ),
+        CheckConstraint(
+            "divergence_reason IS NULL OR length(btrim(divergence_reason)) BETWEEN 3 AND 500",
+            name="divergence_reason_length",
         ),
         CheckConstraint(
             "emv_payload IS NULL OR length(emv_payload) BETWEEN 1 AND 4096",
@@ -171,6 +283,7 @@ class PixCharge(ScopeMixin, TimestampMixin, Base):
             postgresql_where=text("status = 'PENDING'"),
         ),
         Index("ix_pix_charges_transaction_id", "transaction_id"),
+        Index("ix_pix_charges_payment_account_id", "payment_account_id"),
         Index("ix_pix_charges_school_id", "school_id"),
         Index(
             "ix_pix_charges_pending_expiry",
@@ -181,10 +294,15 @@ class PixCharge(ScopeMixin, TimestampMixin, Base):
 
     id: Mapped[uuid.UUID] = fin_pk()
     transaction_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    payment_account_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     provider: Mapped[str] = mapped_column(Text)
     txid: Mapped[str] = mapped_column(Text)
+    # PENDING until the provider answers: PAID (exactly the amount), REVIEW_REQUIRED (a different
+    # amount: the management decides), EXPIRED or CANCELLED.
     status: Mapped[str] = mapped_column(Text, server_default=text("'PENDING'"))
     amount_cents: Mapped[int] = mapped_column(BigInteger)
+    received_amount_cents: Mapped[int | None] = mapped_column(BigInteger)
+    divergence_reason: Mapped[str | None] = mapped_column(Text)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     # The "Pix copia e cola" BR Code. Not secret, but only recorded as present in the audit log.
     emv_payload: Mapped[str | None] = mapped_column(Text)
@@ -281,6 +399,9 @@ class AuditLog(Base):
         CheckConstraint(r"action ~ '^[a-z0-9_]+(\.[a-z0-9_]+)+$'", name="action_format"),
         CheckConstraint("entity_type ~ '^[a-z0-9_]+$'", name="entity_type_format"),
         CheckConstraint(
+            "entity_reference IS NULL OR entity_reference > 0", name="entity_reference_positive"
+        ),
+        CheckConstraint(
             "before_data IS NULL OR jsonb_typeof(before_data) = 'object'", name="before_data_object"
         ),
         CheckConstraint(
@@ -291,6 +412,12 @@ class AuditLog(Base):
         ),
         Index("ix_audit_logs_school_occurred", "school_id", "occurred_at"),
         Index("ix_audit_logs_entity", "entity_type", "entity_id"),
+        Index(
+            "ix_audit_logs_school_reference",
+            "school_id",
+            "entity_reference",
+            postgresql_where=text("entity_reference IS NOT NULL"),
+        ),
         Index("ix_audit_logs_organization_id", "organization_id"),
         Index(
             "ix_audit_logs_actor_user_id",
@@ -310,6 +437,8 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(Text)
     entity_type: Mapped[str] = mapped_column(Text)
     entity_id: Mapped[uuid.UUID | None] = mapped_column(Uuid)
+    # The reference_code of the movement, for readable sentences ("... APM-20261002-000042").
+    entity_reference: Mapped[int | None] = mapped_column(BigInteger)
     # Never personal data: ids and non-personal columns only.
     before_data: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     after_data: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
@@ -321,7 +450,7 @@ class AuditLog(Base):
 
 
 class MonthlyClosing(ScopeMixin, Base):
-    """A closed month. Every figure and the hash are computed by the database (trigger)."""
+    """A closed month. Every figure, the hash and the breakdown are computed by the database."""
 
     __tablename__ = "monthly_closings"
     __table_args__ = (
@@ -334,14 +463,26 @@ class MonthlyClosing(ScopeMixin, Base):
             name="calendar_month",
         ),
         CheckConstraint(
+            "total_in_cents = contributions_in_cents + other_in_cents + refunds_in_cents "
+            "AND total_out_cents = expenses_out_cents + reimbursements_out_cents",
+            name="totals_add_up",
+        ),
+        CheckConstraint(
             "closing_balance_cents = opening_balance_cents + total_in_cents - total_out_cents",
             name="balance_arithmetic",
         ),
         CheckConstraint(
-            "total_in_cents >= 0 AND total_out_cents >= 0 AND entries_count >= 0",
+            "closing_after_pending_cents = closing_balance_cents - pending_reimbursements_cents",
+            name="committed_arithmetic",
+        ),
+        CheckConstraint(
+            "contributions_in_cents >= 0 AND other_in_cents >= 0 AND refunds_in_cents >= 0 "
+            "AND expenses_out_cents >= 0 AND reimbursements_out_cents >= 0 "
+            "AND pending_reimbursements_cents >= 0 AND entries_count >= 0",
             name="totals_non_negative",
         ),
         CheckConstraint(f"entries_hash ~ '{HEX64}'", name="entries_hash_format"),
+        CheckConstraint("jsonb_typeof(breakdown) = 'object'", name="breakdown_object"),
         CheckConstraint(
             "report_ref IS NULL OR length(report_ref) BETWEEN 1 AND 500", name="report_ref_length"
         ),
@@ -369,13 +510,28 @@ class MonthlyClosing(ScopeMixin, Base):
     period_start: Mapped[date] = mapped_column(Date)
     period_end: Mapped[date] = mapped_column(Date, server_default=FetchedValue())
     timezone: Mapped[str] = mapped_column(Text, server_default=FetchedValue())
+    # The cash figures, computed by statement_summary at the moment of the closing.
     opening_balance_cents: Mapped[int] = mapped_column(BigInteger, server_default=FetchedValue())
+    contributions_in_cents: Mapped[int] = mapped_column(BigInteger, server_default=FetchedValue())
+    other_in_cents: Mapped[int] = mapped_column(BigInteger, server_default=FetchedValue())
+    refunds_in_cents: Mapped[int] = mapped_column(BigInteger, server_default=FetchedValue())
     total_in_cents: Mapped[int] = mapped_column(BigInteger, server_default=FetchedValue())
+    expenses_out_cents: Mapped[int] = mapped_column(BigInteger, server_default=FetchedValue())
+    reimbursements_out_cents: Mapped[int] = mapped_column(BigInteger, server_default=FetchedValue())
     total_out_cents: Mapped[int] = mapped_column(BigInteger, server_default=FetchedValue())
     closing_balance_cents: Mapped[int] = mapped_column(BigInteger, server_default=FetchedValue())
+    # A photograph of the moment (the history of a status is not stored): not in the hash.
+    pending_reimbursements_cents: Mapped[int] = mapped_column(
+        BigInteger, server_default=FetchedValue()
+    )
+    closing_after_pending_cents: Mapped[int] = mapped_column(
+        BigInteger, server_default=FetchedValue()
+    )
     entries_count: Mapped[int] = mapped_column(Integer, server_default=FetchedValue())
     # sha256 (hex) of the canonical text of the entries (see docs/financial-model.md).
     entries_hash: Mapped[str] = mapped_column(Text, server_default=FetchedValue())
+    # {report_group: {in, out, count, categories: {key: {in, out, count}}}}
+    breakdown: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=FetchedValue())
     closed_by_user_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     closed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     report_ref: Mapped[str | None] = mapped_column(Text)
