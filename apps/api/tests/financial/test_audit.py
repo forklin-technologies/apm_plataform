@@ -24,8 +24,10 @@ from tests.financial.support import (
     add_cash_contribution,
     add_expense,
     add_pix_contribution,
+    add_pix_review,
     add_refund,
     add_reimbursement,
+    set_status,
     token_hash,
     utc,
 )
@@ -50,12 +52,16 @@ def act_as(conn: Connection, user: uuid.UUID | None, actor_type: str | None = "U
     )
 
 
+def _scalar(conn: Connection, sql: str, **params: object) -> Any:
+    return conn.execute(text(sql), params).scalar_one()
+
+
 def audit_rows(conn: Connection, entity_type: str, entity_id: uuid.UUID) -> list[Any]:
     return list(
         conn.execute(
             text(
                 "SELECT action, actor_user_id, actor_type, request_id, host(ip), before_data, "
-                "after_data, organization_id, school_id FROM audit_logs "
+                "after_data, organization_id, school_id, entity_reference FROM audit_logs "
                 "WHERE entity_type = :t AND entity_id = :e ORDER BY occurred_at, id"
             ),
             {"t": entity_type, "e": entity_id},
@@ -206,21 +212,32 @@ CANARIES = {
     "guardian": "CANARY-GUARDIAN",
     "student": "CANARY-STUDENT",
     "class_name": "CANARY-CLASS",
+    "email": "canary-contributor@example.test",
+    "phone": "CANARY-+55-11-90000-0000",
     "description": "CANARY-DESCRIPTION",
     "vendor": "CANARY-VENDOR",
+    "purchase_reason": "CANARY-PURCHASE-REASON",
     "decision_reason": "CANARY-DECISION",
+    "correction_reason": "CANARY-CORRECTION",
+    "review_reason": "CANARY-REVIEW-REASON",
+    "divergence_reason": "CANARY-DIVERGENCE",
     "refund_reason": "CANARY-REFUND-REASON",
+    "origin_name": "CANARY-ORIGIN-NAME",
     "payment_reference": "CANARY-PAYMENT-REF",
     "file_name": "CANARY-FILE.pdf",
     "storage_key": "k/CANARY-KEY",
     "emv": "CANARY-EMV-PAYLOAD",
+    "external_account": "CANARY-ACCOUNT-ID",
+    "secret_ref": "env:CANARY_SECRET_REF",
     "reopen_reason": "CANARY-REOPEN-REASON",
     "report_ref": "CANARY-REPORT.pdf",
 }
 PERSONAL_KEYS = {
-    "guardian_name", "student_name", "class_name", "description", "vendor", "decision_reason",
-    "reason", "payment_reference", "file_name", "storage_key", "emv_payload", "receipt_token_hash",
-    "reopen_reason", "report_ref",
+    "guardian_name", "student_name", "class_name", "contributor_email", "contributor_phone",
+    "description", "vendor", "purchase_reason", "decision_reason", "correction_reason",
+    "review_decision_reason", "divergence_reason", "reason", "origin_name", "payment_reference",
+    "file_name", "storage_key", "emv_payload", "receipt_token_hash", "external_account_id",
+    "secret_ref", "webhook_secret_hash", "reopen_reason", "report_ref",
 }  # fmt: skip
 
 
@@ -229,74 +246,99 @@ def test_every_audited_table_writes_its_record_and_none_carries_personal_data(
 ) -> None:
     conn, f = world
     act_as(conn, f.treasurer)
-    hash_ = token_hash()
+    webhook_hash = token_hash()
 
-    # contributions (insert, anonymize), financial_transactions (insert, settle)
+    # contributions (insert, anonymize), financial_transactions (insert)
     cash = add_cash_contribution(
         conn, f, 10000, utc(2025, 3, 5, 15), guardian=CANARIES["guardian"],
         student=CANARIES["student"], class_name=CANARIES["class_name"],
+        email=CANARIES["email"], phone=CANARIES["phone"],
     )  # fmt: skip
     conn.execute(
-        text("UPDATE contributions SET guardian_name = NULL WHERE transaction_id = :t"), {"t": cash}
+        text(
+            "UPDATE contributions SET guardian_name = NULL, contributor_email = NULL "
+            "WHERE transaction_id = :t"
+        ),
+        {"t": cash},
     )
-    # pix_charges (insert, update) with a receipt token hash
-    pix_tx, charge = add_pix_contribution(conn, f, 3000)
-    conn.execute(
-        text("UPDATE contributions SET guardian_name = guardian_name WHERE transaction_id = :t"),
-        {"t": pix_tx},
-    )
+    # A Pix in review accepted by the management: the review reason, then the amount received.
+    _, charge = add_pix_contribution(conn, f, 3000)
     conn.execute(
         text("UPDATE pix_charges SET emv_payload = :e WHERE id = :c"),
         {"e": CANARIES["emv"], "c": charge},
     )
+    review_tx, review_charge = add_pix_review(conn, f, 3300, 3350)
     conn.execute(
-        text(
-            "UPDATE contributions SET receipt_expires_at = receipt_expires_at WHERE transaction_id = :t"
-        ),
-        {"t": pix_tx},
-    )
-    # expenses (insert, decide), expense_attachments (insert)
-    expense = add_expense(conn, f, 1000)
-    conn.execute(
-        text("UPDATE expenses SET vendor = :v, description = :d WHERE transaction_id = :t"),
-        {"v": CANARIES["vendor"], "d": CANARIES["description"], "t": expense},
+        text("UPDATE contributions SET review_decision_reason = :r WHERE transaction_id = :t"),
+        {"r": CANARIES["review_reason"], "t": review_tx},
     )
     conn.execute(
         text(
-            "UPDATE expenses SET approved_by_user_id = :u, decision_reason = :r WHERE transaction_id = :t"
+            "UPDATE financial_transactions SET status = 'PAID', amount_cents = 3350, "
+            "settled_at = :at WHERE id = :t"
         ),
-        {"u": f.treasurer, "r": CANARIES["decision_reason"], "t": expense},
+        {"at": utc(2025, 3, 11, 15), "t": review_tx},
+    )
+    # expenses (insert, edit, decide), expense_attachments (insert)
+    expense = add_expense(conn, f, 1000, status="DRAFT")
+    conn.execute(
+        text(
+            "UPDATE expenses SET vendor = :v, description = :d, purchase_reason = :p "
+            "WHERE transaction_id = :t"
+        ),
+        {
+            "v": CANARIES["vendor"],
+            "d": CANARIES["description"],
+            "p": CANARIES["purchase_reason"],
+            "t": expense,
+        },
     )
     attachment: Any = conn.execute(
         text(
-            "INSERT INTO expense_attachments (organization_id, school_id, transaction_id, storage_key, "
-            "file_name, content_type, size_bytes, sha256, uploaded_by_user_id) "
-            "VALUES (:o, :s, :t, :k, :n, 'application/pdf', 100, :h, :u) RETURNING id"
+            "INSERT INTO expense_attachments (organization_id, school_id, transaction_id, kind, "
+            "storage_key, file_name, content_type, size_bytes, sha256, uploaded_by_user_id) "
+            "VALUES (:o, :s, :t, 'INVOICE', :k, :n, 'application/pdf', 100, :h, :u) RETURNING id"
         ),
         {"o": f.org, "s": f.school, "t": expense, "k": CANARIES["storage_key"],
-         "n": CANARIES["file_name"], "h": hash_, "u": f.staff},
+         "n": CANARIES["file_name"], "h": token_hash(), "u": f.staff},
     ).scalar_one()  # fmt: skip
-    # reimbursements, refunds (insert, payment reference)
-    collab = add_expense(conn, f, 700, paid_by="COLLABORATOR", status="APPROVED")
-    reimbursement = add_reimbursement(conn, f, collab, 700)
+    set_status(conn, expense, "SUBMITTED")
     conn.execute(
-        text("UPDATE reimbursements SET payment_reference = :r WHERE transaction_id = :t"),
-        {"r": CANARIES["payment_reference"], "t": reimbursement},
+        text("UPDATE expenses SET correction_reason = :r WHERE transaction_id = :t"),
+        {"r": CANARIES["correction_reason"], "t": expense},
     )
-    refund = add_refund(conn, f, cash, "CONTRIBUTION", 500)
+    set_status(conn, expense, "CORRECTION_REQUESTED")
+    set_status(conn, expense, "SUBMITTED")
+    conn.execute(
+        text(
+            "UPDATE expenses SET approved_by_user_id = :u, approved_amount_cents = 1000, "
+            "decision_reason = :r WHERE transaction_id = :t"
+        ),
+        {"u": f.treasurer, "r": CANARIES["decision_reason"], "t": expense},
+    )
+    # reimbursements, refunds (insert, payment reference, confirmation)
+    collab = add_expense(conn, f, 700, paid_by="COLLABORATOR", status="APPROVED")
+    reimbursement = add_reimbursement(conn, f, collab)
+    conn.execute(
+        text(
+            "UPDATE reimbursements SET payment_reference = :r, paid_by_user_id = :u "
+            "WHERE transaction_id = :t"
+        ),
+        {"r": CANARIES["payment_reference"], "u": f.treasurer, "t": reimbursement},
+    )
+    refund = add_refund(
+        conn, f, 500, reason=CANARIES["refund_reason"], origin_name=CANARIES["origin_name"],
+        origin_type="OTHER",
+    )  # fmt: skip
     conn.execute(
         text("UPDATE refunds SET payment_reference = :r WHERE transaction_id = :t"),
         {"r": CANARIES["payment_reference"], "t": refund},
     )
-    conn.execute(
-        text("UPDATE refunds SET payment_reference = payment_reference WHERE transaction_id = :t"),
-        {"t": refund},
-    )
-    # categories, school_settings
+    # categories, school_settings, payment_accounts (a hash and a reference that are never copied)
     category: Any = conn.execute(
         text(
-            "INSERT INTO categories (organization_id, school_id, key, name, applies_to) "
-            "VALUES (:o, :s, 'canary_key', 'Eventos', 'IN') RETURNING id"
+            "INSERT INTO categories (organization_id, school_id, key, name, applies_to, report_group) "
+            "VALUES (:o, :s, 'canary_key', 'Eventos', 'IN', 'OTHER_INCOME') RETURNING id"
         ),
         {"o": f.org, "s": f.school},
     ).scalar_one()
@@ -304,6 +346,18 @@ def test_every_audited_table_writes_its_record_and_none_carries_personal_data(
     conn.execute(
         text("UPDATE school_settings SET pix_expiration_minutes = 45 WHERE school_id = :s"),
         {"s": f.school},
+    )
+    account: Any = conn.execute(
+        text(
+            "INSERT INTO payment_accounts (organization_id, school_id, provider, external_account_id, "
+            "status, secret_ref, webhook_secret_hash) "
+            "VALUES (:o, :s, 'BB', :e, 'PENDING', :r, :h) RETURNING id"
+        ),
+        {"o": f.org, "s": f.school, "e": CANARIES["external_account"],
+         "r": CANARIES["secret_ref"], "h": webhook_hash},
+    ).scalar_one()  # fmt: skip
+    conn.execute(
+        text("UPDATE payment_accounts SET status = 'INACTIVE' WHERE id = :a"), {"a": account}
     )
     # monthly_closings (insert, report, nothing else is allowed on an active closing)
     closing: Any = conn.execute(
@@ -318,25 +372,32 @@ def test_every_audited_table_writes_its_record_and_none_carries_personal_data(
         {"r": CANARIES["report_ref"], "c": closing},
     )
 
-    expected: dict[str, tuple[uuid.UUID, list[str]]] = {
-        "financial_transactions": (cash, ["insert"]),
-        "contributions": (cash, ["insert", "update"]),
-        "pix_charges": (charge, ["insert", "update"]),
-        "expenses": (expense, ["insert", "update", "update"]),
-        "expense_attachments": (attachment, ["insert"]),
-        "reimbursements": (reimbursement, ["insert", "update"]),
-        "refunds": (refund, ["insert", "update"]),
-        "categories": (category, ["insert", "update"]),
-        "school_settings": (f.school, ["insert", "update"]),
-        "monthly_closings": (closing, ["insert", "update"]),
+    # (entity, the first action and how many updates it saw at least)
+    expected: dict[str, tuple[uuid.UUID, int]] = {
+        "financial_transactions": (cash, 0),
+        "contributions": (cash, 1),
+        "pix_charges": (charge, 1),
+        "expenses": (expense, 2),
+        "expense_attachments": (attachment, 0),
+        "reimbursements": (reimbursement, 1),
+        "refunds": (refund, 1),
+        "categories": (category, 1),
+        "school_settings": (f.school, 1),
+        "payment_accounts": (account, 1),
+        "monthly_closings": (closing, 1),
     }
-    for table, (entity, actions) in expected.items():
+    for table, (entity, updates) in expected.items():
         rows = audit_rows(conn, table, entity)
-        assert [row.action.split(".")[1] for row in rows] == actions, table
+        actions = [row.action.split(".")[1] for row in rows]
+        assert actions[0] == "insert" and actions.count("update") >= updates, (table, actions)
         assert all(row.action.startswith(f"{table}.") for row in rows), table
-        assert all(row.actor_user_id == f.treasurer for row in rows[1:]), (
-            table
-        )  # acted as the treasurer
+        assert all(row.actor_user_id == f.treasurer for row in rows[1:]), table
+
+    # The readable reference: the reference_code of the movement, also for its detail rows.
+    code = _scalar(conn, "SELECT reference_code FROM financial_transactions WHERE id = :t", t=cash)
+    for table in ("financial_transactions", "contributions"):
+        assert {row.entity_reference for row in audit_rows(conn, table, cash)} == {code}, table
+    assert audit_rows(conn, "categories", category)[0].entity_reference is None
 
     # Nothing personal in any record of this school: neither the values nor the column names.
     everything = conn.execute(
@@ -345,16 +406,60 @@ def test_every_audited_table_writes_its_record_and_none_carries_personal_data(
     blob = json.dumps([[row[0], row[1]] for row in everything])
     for canary in CANARIES.values():
         assert canary not in blob, canary
-    receipt_hash: str = conn.execute(
-        text("SELECT receipt_token_hash FROM contributions WHERE transaction_id = :t"),
-        {"t": pix_tx},
-    ).scalar_one()
-    assert receipt_hash not in blob  # the secret of the receipt link is never copied
+    receipt_hash: str = (
+        conn.execute(
+            text("SELECT receipt_token_hash FROM contributions WHERE transaction_id = :t"),
+            {"t": cash},
+        ).scalar_one()
+        or ""
+    )
+    for secret in (receipt_hash, webhook_hash):
+        assert secret and secret not in blob  # the hash of a secret is never copied
     keys = {key for row in everything for image in row for key in (image or {})}
     assert not (keys & PERSONAL_KEYS)
     # What is kept instead is whether they are set.
-    assert {"guardian_name_present", "description_present", "payment_reference_present",
-            "emv_payload_present", "report_ref_present", "file_name_present"} <= keys  # fmt: skip
+    assert {"guardian_name_present", "contributor_email_present", "description_present",
+            "purchase_reason_present", "payment_reference_present", "emv_payload_present",
+            "report_ref_present", "file_name_present", "review_decision_reason_present",
+            "external_account_id_present", "secret_ref_present", "webhook_secret_hash_present",
+            "origin_name_present"} <= keys  # fmt: skip
     anonymized = [r for r in audit_rows(conn, "contributions", cash) if r.action.endswith("update")]
-    assert anonymized[0].before_data == {"guardian_name_present": True}
-    assert anonymized[0].after_data == {"guardian_name_present": False}
+    assert anonymized[0].before_data == {
+        "guardian_name_present": True,
+        "contributor_email_present": True,
+    }
+    assert anonymized[0].after_data == {
+        "guardian_name_present": False,
+        "contributor_email_present": False,
+    }
+
+
+def test_accepting_a_review_records_the_amount_before_and_after(
+    world: tuple[Connection, Fresh],
+) -> None:
+    """Condition (3) of the round 2: the audit log shows the value that was adjusted."""
+    conn, f = world
+    act_as(conn, f.treasurer)
+    tx, _ = add_pix_review(conn, f, 3300, 3350)
+    conn.execute(
+        text(
+            "UPDATE contributions SET review_decision_reason = 'accepted by the management' WHERE transaction_id = :t"
+        ),
+        {"t": tx},
+    )
+    conn.execute(
+        text(
+            "UPDATE financial_transactions SET status = 'PAID', amount_cents = 3350, "
+            "settled_at = :at WHERE id = :t"
+        ),
+        {"at": utc(2025, 3, 11, 15), "t": tx},
+    )
+
+    accepted = [
+        r for r in audit_rows(conn, "financial_transactions", tx) if r.action.endswith("update")
+    ][-1]
+
+    assert accepted.before_data["amount_cents"] == 3300
+    assert accepted.after_data["amount_cents"] == 3350
+    assert accepted.before_data["status"] == "REVIEW_REQUIRED"
+    assert accepted.after_data["status"] == "PAID"

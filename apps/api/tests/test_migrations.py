@@ -24,6 +24,7 @@ FINANCIAL_TABLES = {
     "expenses",
     "financial_transactions",
     "monthly_closings",
+    "payment_accounts",
     "pix_charges",
     "refunds",
     "reimbursements",
@@ -40,12 +41,12 @@ EXPECTED_TABLES = {
     "sessions",
     "users",
 } | FINANCIAL_TABLES
-# 30 of TASK-003 and 0006 (sessions, login_attempts, invitations, users self, apm_definer) + 34 of
-# the financial schema (12 select, 12 insert, 10 update)
-EXPECTED_POLICIES = 30 + 34
+# 30 of TASK-003 and 0006 (sessions, login_attempts, invitations, users self, apm_definer) + 37 of
+# the financial schema (13 select, 13 insert, 11 update)
+EXPECTED_POLICIES = 30 + 37
 # 7 of TASK-003 and 0006 (app_org, app_school, app_session_id, app_user_id + the 3 SECURITY
-# DEFINER) + 26 financial functions (all SECURITY INVOKER, see test_financial_triggers)
-EXPECTED_FUNCTIONS = 7 + 26
+# DEFINER) + 32 financial functions (all SECURITY INVOKER, see test_financial_triggers)
+EXPECTED_FUNCTIONS = 7 + 32
 EXPECTED_CATALOG = {
     "tables": EXPECTED_TABLES,
     "policies": EXPECTED_POLICIES,

@@ -354,8 +354,8 @@ def test_there_is_no_system_mode_and_the_only_open_policy_is_the_login_lookup(
             )
         ).all()
 
-    # 30 of TASK-003 and 0006 + 34 of the financial schema (0007)
-    assert len(policies) == 30 + 34
+    # 30 of TASK-003 and 0006 + 37 of the financial schema (0007)
+    assert len(policies) == 30 + 37
     open_ones = set()
     for name, qual, check, roles in policies:
         if qual.strip().lower() == "true" or check.strip().lower() == "true":
