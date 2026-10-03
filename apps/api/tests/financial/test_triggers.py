@@ -184,7 +184,13 @@ EXPECTED_FUNCTIONS = {
     "pix_charges_check_contribution", "school_settings_lock_timezone", "schools_create_settings",
     "contributions_check_insert", "expenses_apply_approval_waiver", "pix_charges_check_end_to_end_id",
     "statement_entries", "statement_pending", "statement_summary", "verify_closing",
+    # tenancy and authentication (0003 to 0006): the context functions and the closed list of ADR-016
+    "app_session_id", "app_user_id", "accept_invitation", "find_login_identity",
+    "list_memberships_for_user",
 }  # fmt: skip
+# The only SECURITY DEFINER functions of the schema (ADR-016, owned by apm_definer; the financial
+# schema has none). tests/test_app_role.py asserts their owner, search_path and who may execute them.
+DEFINER_FUNCTIONS = {"accept_invitation", "find_login_identity", "list_memberships_for_user"}
 
 
 def _decode(trigger_type: int) -> tuple[str, frozenset[str], str]:
@@ -235,7 +241,8 @@ def test_the_triggers_fire_in_the_order_the_model_needs(admin_engine: Engine) ->
 
 
 def test_every_function_is_security_invoker_with_a_fixed_search_path(admin_engine: Engine) -> None:
-    """The closed list of SECURITY DEFINER functions (ADR-016) is not touched by this task."""
+    """The financial functions are all SECURITY INVOKER; the closed list of SECURITY DEFINER
+    functions (ADR-016) is not touched by this task."""
     with admin_engine.connect() as connection:
         rows = connection.execute(
             text(
@@ -246,9 +253,9 @@ def test_every_function_is_security_invoker_with_a_fixed_search_path(admin_engin
         ).all()
     assert {row[0] for row in rows} == EXPECTED_FUNCTIONS
     for name, security_definer, config, owner, volatility, _is_trigger in rows:
-        assert security_definer is False, name
+        assert security_definer is (name in DEFINER_FUNCTIONS), name
         assert config == ["search_path=pg_catalog"], name
-        assert owner == "apm_owner", name
+        assert owner == ("apm_definer" if name in DEFINER_FUNCTIONS else "apm_owner"), name
         if name.startswith(("statement_", "org_statement_")) or name in (
             "closing_entries_hash",
             "closing_breakdown",
@@ -266,7 +273,9 @@ def test_no_security_definer_function_exists_anywhere(admin_engine: Engine) -> N
                 "WHERE p.prosecdef AND n.nspname NOT IN ('pg_catalog', 'information_schema')"
             )
         ).all()
-    assert definers == []
+    assert sorted(row[0] for row in definers) == sorted(
+        f"public.{name}" for name in DEFINER_FUNCTIONS
+    )  # the closed list of ADR-016, nothing else
 
 
 # --- rules --------------------------------------------------------------------------------------
