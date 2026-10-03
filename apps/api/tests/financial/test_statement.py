@@ -33,11 +33,14 @@ from tests.financial.support import (
     add_collaborator_expense,
     add_expense,
     add_pix_contribution,
+    add_pix_review,
     add_refund,
     check_consistency,
     entries,
     make_school,
+    set_status,
     summary,
+    summary_row,
     utc,
 )
 
@@ -105,15 +108,14 @@ def test_an_expense_paid_by_a_collaborator_moves_the_cash_only_through_its_reimb
 
     # Paid on March 25: ONE outflow of 4000, not two.
     conn.execute(
-        text("UPDATE reimbursements SET payment_reference = 'bank-1' WHERE transaction_id = :t"),
-        {"t": reimbursement},
-    )
-    conn.execute(
         text(
-            "UPDATE financial_transactions SET status = 'PAID', settled_at = :at WHERE id = ANY(:ids)"
+            "UPDATE reimbursements SET payment_reference = 'bank-1', paid_by_user_id = :u "
+            "WHERE transaction_id = :t"
         ),
-        {"at": utc(2025, 3, 25, 15), "ids": [reimbursement, expense]},
+        {"u": f.treasurer, "t": reimbursement},
     )
+    set_status(conn, reimbursement, "PAID", utc(2025, 3, 25, 15))
+    set_status(conn, expense, "PAID", utc(2025, 3, 25, 15))
     check_consistency(conn)
 
     assert summary(conn, f, *MAR) == (0, 0, 4000, -4000, 1)
@@ -127,39 +129,33 @@ def test_an_expense_paid_by_a_collaborator_moves_the_cash_only_through_its_reimb
     )
 
 
-def test_a_refund_of_a_contribution_goes_out(world: tuple[Connection, Fresh]) -> None:
+def test_a_return_with_no_parent_comes_in(world: tuple[Connection, Fresh]) -> None:
+    """A devolução is money coming BACK to the APM: it enters the cash on CONFIRMED, even when it
+    answers no expense (a payment made by mistake)."""
     conn, f = world
-    contribution = add_cash_contribution(conn, f, 10000, utc(2025, 3, 5, 15))
-    add_refund(
-        conn, f, contribution, "CONTRIBUTION", 3000, status="PAID",
-        settled_at=utc(2025, 3, 18, 15), reference="r-1",
-    )  # fmt: skip
+    add_cash_contribution(conn, f, 10000, utc(2025, 3, 5, 15))
+    add_refund(conn, f, 2000, status="CONFIRMED", settled_at=utc(2025, 3, 18, 15))
+    add_refund(conn, f, 700, status="AWAITING_CONFIRMATION")  # not confirmed: not cash
 
-    assert summary(conn, f, *MAR) == (0, 10000, 3000, 7000, 2)
-    assert signed(entries(conn, f, *MAR)) == [10000, -3000]
+    assert summary(conn, f, *MAR) == (0, 12000, 0, 12000, 2)
+    assert signed(entries(conn, f, *MAR)) == [10000, 2000]
 
 
-def test_a_refund_of_an_expense_comes_in(world: tuple[Connection, Fresh]) -> None:
+def test_a_return_of_an_expense_comes_in(world: tuple[Connection, Fresh]) -> None:
     conn, f = world
     add_cash_contribution(conn, f, 10000, utc(2025, 3, 5, 15))
     expense = add_expense(conn, f, 2500, status="PAID", settled_at=utc(2025, 3, 20, 15))
     add_refund(
-        conn,
-        f,
-        expense,
-        "EXPENSE",
-        1000,
-        status="PAID",
+        conn, f, 1000, parent=expense, parent_kind="EXPENSE", status="CONFIRMED",
         settled_at=utc(2025, 4, 2, 15),
-        reference="r-2",
-    )
+    )  # fmt: skip
 
     assert summary(conn, f, *MAR) == (0, 10000, 2500, 7500, 2)
     assert summary(conn, f, *APR) == (7500, 1000, 0, 8500, 1)
     rows = entries(conn, f, *APR)
     assert signed(rows) == [1000]
     assert [(r.opening_balance_cents, r.running_balance_cents) for r in rows] == [(7500, 8500)]
-    assert [r.direction for r in rows] == ["IN"]
+    assert [(r.direction, r.display_type) for r in rows] == [("IN", "REFUND")]
 
 
 def test_the_running_balance_follows_the_order_of_booking_then_the_reference_code(
@@ -184,28 +180,20 @@ def test_pending_items_are_listed_apart_and_never_enter_the_balance(
     conn, f = world
     add_cash_contribution(conn, f, 10000, utc(2025, 3, 5, 15))
     add_pix_contribution(conn, f, 3000)  # a receber
+    add_pix_review(conn, f, 3300, 3350)  # em análise
     add_expense(conn, f, 1500)  # submitted: aguardando aprovação
+    add_expense(conn, f, 1100, status="CORRECTION_REQUESTED")  # aguardando correção
     add_expense(conn, f, 1200, status="APPROVED")  # a pagar (the APM pays)
+    add_expense(conn, f, 1300, status="DRAFT")  # a draft is not listed
     add_collaborator_expense(conn, f, 4000)  # only its reimbursement is a payable
-    contribution_paid = add_cash_contribution(conn, f, 900, utc(2025, 3, 6, 15))
-    add_refund(conn, f, contribution_paid, "CONTRIBUTION", 300)  # a pagar
-    paid_expense = add_expense(conn, f, 800, status="PAID", settled_at=utc(2025, 3, 7, 15))
-    add_refund(conn, f, paid_expense, "EXPENSE", 200)  # a receber
+    add_refund(conn, f, 300)  # a receber (REQUESTED)
+    add_refund(conn, f, 200, status="AWAITING_CONFIRMATION")  # a receber
+    add_refund(conn, f, 99, status="REJECTED")  # not listed
+    add_cash_contribution(conn, f, 900, utc(2025, 3, 6, 15))
+    add_expense(conn, f, 800, status="PAID", settled_at=utc(2025, 3, 7, 15))
     cancelled = add_pix_contribution(conn, f, 700)[0]
-    conn.execute(
-        text("UPDATE financial_transactions SET status = 'CANCELLED' WHERE id = :t"),
-        {"t": cancelled},
-    )
-    rejected = add_expense(conn, f, 600)
-    conn.execute(
-        text(
-            "UPDATE expenses SET approved_by_user_id = :u, decision_reason = 'not allowed' WHERE transaction_id = :t"
-        ),
-        {"u": f.treasurer, "t": rejected},
-    )
-    conn.execute(
-        text("UPDATE financial_transactions SET status = 'REJECTED' WHERE id = :t"), {"t": rejected}
-    )
+    set_status(conn, cancelled, "CANCELLED")
+    add_expense(conn, f, 600, status="REJECTED")
 
     pending = conn.execute(
         text("SELECT kind, section, amount_cents FROM statement_pending(:s)"), {"s": f.school}
@@ -214,10 +202,12 @@ def test_pending_items_are_listed_apart_and_never_enter_the_balance(
     assert sorted((r.kind, r.section, r.amount_cents) for r in pending) == sorted(
         [
             ("CONTRIBUTION", "RECEIVABLE", 3000),
+            ("CONTRIBUTION", "REVIEW", 3300),
             ("EXPENSE", "AWAITING_APPROVAL", 1500),
+            ("EXPENSE", "AWAITING_CORRECTION", 1100),
             ("EXPENSE", "PAYABLE", 1200),
             ("REIMBURSEMENT", "PAYABLE", 4000),
-            ("REFUND", "PAYABLE", 300),
+            ("REFUND", "RECEIVABLE", 300),
             ("REFUND", "RECEIVABLE", 200),
         ]
     )
@@ -641,9 +631,26 @@ def _generate(conn: Connection, f: Fresh, rng: random.Random, zone: ZoneInfo) ->
     for _ in range(rng.randint(8, 22)):
         amount = rng.randint(1, 50000)
         at = when()
-        kind = rng.choice(["cash", "pix", "apm", "collab", "refund_c", "refund_e", "pending"])
+        kind = rng.choice(
+            [
+                "cash",
+                "transfer",
+                "pix",
+                "apm",
+                "collab",
+                "partial",
+                "refund_e",
+                "refund_free",
+                "pending",
+            ]
+        )
         if kind == "cash":
             moves.append(Move(add_cash_contribution(conn, f, amount, at), amount, at))
+        elif kind == "transfer":  # a manual entry with its own category (other income)
+            tx = add_cash_contribution(
+                conn, f, amount, at, method="TRANSFER", category=f.cat_other, origin_type="OTHER"
+            )
+            moves.append(Move(tx, amount, at))
         elif kind == "pix":
             tx, _ = add_pix_contribution(conn, f, amount, paid_at=at)
             moves.append(Move(tx, amount, at))
@@ -654,39 +661,42 @@ def _generate(conn: Connection, f: Fresh, rng: random.Random, zone: ZoneInfo) ->
         elif kind == "collab":
             _, reimbursement = add_collaborator_expense(conn, f, amount, reimbursed_at=at)
             moves.append(Move(reimbursement, -amount, at))  # the expense itself never counts
-        elif kind == "refund_c":
-            parent = add_cash_contribution(conn, f, amount, at)
-            moves.append(Move(parent, amount, at))
-            part = rng.randint(1, amount)
-            rat = when()
-            refund = add_refund(
-                conn,
-                f,
-                parent,
-                "CONTRIBUTION",
-                part,
-                status="PAID",
-                settled_at=rat,
-                reference="ref",
+        elif (
+            kind == "partial"
+        ):  # approved for less than requested: the reimbursement is the approved amount
+            approved = rng.randint(1, amount)
+            _, reimbursement = add_collaborator_expense(
+                conn, f, amount, approved_amount=approved, reimbursed_at=at
             )
-            moves.append(Move(refund, -part, rat))
-        elif kind == "refund_e":
+            moves.append(Move(reimbursement, -approved, at))
+        elif kind == "refund_e":  # money back for an expense the APM paid, up to what it paid
             parent = add_expense(conn, f, amount, status="PAID", settled_at=at)
             moves.append(Move(parent, -amount, at))
             part = rng.randint(1, amount)
             rat = when()
             refund = add_refund(
-                conn, f, parent, "EXPENSE", part, status="PAID", settled_at=rat, reference="ref"
+                conn,
+                f,
+                part,
+                parent=parent,
+                parent_kind="EXPENSE",
+                status="CONFIRMED",
+                settled_at=rat,
             )
             moves.append(Move(refund, part, rat))
+        elif kind == "refund_free":  # a wrong payment returned: no parent
+            refund = add_refund(conn, f, amount, status="CONFIRMED", settled_at=at)
+            moves.append(Move(refund, amount, at))
         else:  # pending: must never count
-            which = rng.randint(0, 2)
+            which = rng.randint(0, 3)
             if which == 0:
                 add_pix_contribution(conn, f, amount)
             elif which == 1:
                 add_expense(conn, f, amount)
-            else:
+            elif which == 2:
                 add_expense(conn, f, amount, status="APPROVED")
+            else:
+                add_refund(conn, f, amount, status="AWAITING_CONFIRMATION")
     return moves
 
 
@@ -734,6 +744,12 @@ def test_the_balance_property_holds_for_a_random_ledger(
             len(inside),
         )
         assert closing == opening + got_in - got_out  # the identity
+        detail = summary_row(conn, f, start_day, end_day)  # the split of the same figures
+        assert (
+            detail.contributions_in_cents + detail.other_in_cents + detail.refunds_in_cents
+            == got_in
+        )
+        assert detail.expenses_out_cents + detail.reimbursements_out_cents == got_out
         carried = closing  # the opening of the next period is this closing
         total_in, total_out, count = total_in + got_in, total_out + got_out, count + got_count
     assert (total_in, total_out, count) == (full[1], full[2], full[4])  # the periods add up
