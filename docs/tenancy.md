@@ -10,12 +10,12 @@ The **tenant is the organization**; a school is a sub-scope of it. Every table i
 | --- | --- | --- |
 | `organizations` | the tenant | `slug` unique (lowercase, digits, hyphens) |
 | `schools` | sub-scope of an organization | `organization_id NOT NULL` → organizations; `slug` **globally** unique (the public portal resolves `/apm/{slug}`, ADR-010); `UNIQUE (id, organization_id)` is the target of the composite foreign keys |
-| `users` | **global identity** (not tenant data) | e-mail unique **ignoring case** (`UNIQUE INDEX ON lower(email)`); `password_hash` nullable until TASK-004 |
+| `users` | **global identity** (not tenant data) | e-mail unique **ignoring case** (`UNIQUE INDEX ON lower(email)`); `password_hash` nullable (nobody without one can log in; see [auth.md](auth.md)) |
 | `memberships` | what a user may do in a tenant | `user_id`, `organization_id NOT NULL`, `school_id` NULL = the whole organization, `role`, `status` |
 
 `memberships` is where isolation is enforced by shape: `FOREIGN KEY (school_id, organization_id) REFERENCES schools (id, organization_id)` means a row can never name an organization and a school that belong to different tenants. With `school_id` NULL the constraint is skipped (`MATCH SIMPLE`), which is how organization-wide access is stored; `organization_id` still has its own foreign key.
 
-Roles (a text `CHECK`, not a native enum, so migrating is easy): `organization_admin` (only with `school_id` NULL), `school_admin`, `treasurer`, `staff`, `viewer`. Statuses: `invited` (default), `active`, `suspended`, `revoked`. The permission matrix (role → permissions) lives **in code**, in TASK-004, not in tables.
+Roles (a text `CHECK`, not a native enum, so migrating is easy): `organization_admin` (only with `school_id` NULL), `school_admin`, `treasurer`, `staff`, `viewer`. Statuses: `invited` (default), `active`, `suspended`, `revoked`. The permission matrix (role → permissions) lives **in code** (`app/auth/permissions.py`, see [auth.md](auth.md)), not in tables.
 
 **Why `platform_admin` is not a membership role.** A platform administrator does not belong to an organization, and `memberships.organization_id` is `NOT NULL` on purpose. Putting a platform role there would either force a fake organization or weaken the invariant that every membership row has a tenant. Platform flows (jobs, super admin, creating tenants) need their own ADR and their own database role (ADR-014).
 
@@ -28,7 +28,7 @@ public.app_org()     -- nullif(current_setting('app.organization_id', true), '')
 public.app_school()  -- nullif(current_setting('app.school_id', true), '')::uuid
 ```
 
-Both are `STABLE`, `SECURITY INVOKER`, with a fixed `search_path = pg_catalog`, owned by `apm_owner`. **There is no `SECURITY DEFINER` function anywhere in the schema** (a test enforces it).
+Both are `STABLE`, `SECURITY INVOKER`, with a fixed `search_path = pg_catalog`, owned by `apm_owner`. **`SECURITY DEFINER` functions exist only on a closed list**: none among the context functions, and the three of migration 0006, owned by `apm_definer` (see [auth.md](auth.md)). A test enumerates every function and fails on any other.
 
 Context semantics: `(organization, None)` is an organization-wide context (every school of it); `(organization, school)` is "working inside that school" (only that school's rows).
 
@@ -47,7 +47,7 @@ with tenant_session(session_factory, ctx) as session:          # commit on succe
 - `bind_tenant(session, ctx)` stores the context in `session.info` and registers an `after_begin` listener that **re-applies it at the start of every transaction** of that session, so `session.commit()` followed by more work keeps the context. A session that was never bound starts each transaction with no context and, with RLS failing closed, sees and writes nothing.
 - `tenant_session(factory, ctx)` is the normal way: open, bind, yield, commit or roll back.
 
-The context is **never** taken from a request (header, query, body). The example FastAPI dependency `app.routers.deps.require_tenant_context` answers **401** unconditionally until authentication exists (TASK-004); `get_tenant_db` builds on it. Because `set_config(..., true)` is transaction-local, a pooled connection never carries a context into its next user (a test reuses a single-connection pool to prove it).
+The context is **never** taken from a request (header, query, body). The example FastAPI dependency `app.routers.deps.require_tenant_context` returns the tenant context of the **active membership of the logged-in session**, re-read on every request (see [auth.md](auth.md)); `get_tenant_db` builds on it. Because `set_config(..., true)` is transaction-local, a pooled connection never carries a context into its next user (a test reuses a single-connection pool to prove it).
 
 ## Row level security
 
@@ -83,15 +83,15 @@ Grants are **explicit per table and, for writes, per column**; there are no defa
 | `organizations` | `SELECT`; `UPDATE (name, updated_at)` | no `INSERT`/`DELETE` (tenants are created by a platform flow); `slug` is not mutable by the application: renaming changes URLs and uniqueness for everyone |
 | `schools` | `SELECT`, `INSERT`; `UPDATE (name, updated_at)` | no `DELETE` (archiving comes later); `slug` is not mutable: `/apm/{slug}` is the public address (ADR-010) printed in links and QR codes |
 | `memberships` | `SELECT`, `DELETE`; `UPDATE (role, status, updated_at)` | **no `INSERT`** and no update of `user_id`, `organization_id`, `school_id`: see "Why `apm_app` cannot create or re-point memberships" |
-| `users` | `SELECT (id, email, full_name, is_active, created_at, updated_at)` | **`password_hash` is not readable** until TASK-004; the ORM model declares it `deferred` so `session.get(User, id)` works. No write privilege |
+| `users` | `SELECT (id, email, full_name, is_active, created_at, updated_at)` | **`password_hash` is not readable** (login gets it through `find_login_identity`); the ORM model declares it `deferred` so `session.get(User, id)` works. Since 0006 the only write privilege is `UPDATE (password_hash, updated_at)` on the user's own row |
 
-Rule: **never grant `UPDATE` on `id`, `organization_id`, `school_id`, `user_id` or `created_at`**, and never table-level `UPDATE` on a tenant table. Which role may change `role` or `status` is decided by the permission matrix in code (TASK-004); the database only guarantees that such a change cannot move the row to another tenant or user. Tests assert the exact column privileges of `apm_app` from the catalog, so a stray grant fails the suite.
+Rule: **never grant `UPDATE` on `id`, `organization_id`, `school_id`, `user_id` or `created_at`**, and never table-level `UPDATE` on a tenant table. Which role may change `role` or `status` is decided by the permission matrix in code (`app/auth/permissions.py`); the database only guarantees that such a change cannot move the row to another tenant or user. Tests assert the exact column privileges of `apm_app` from the catalog, so a stray grant fails the suite.
 
 ### Why `apm_app` cannot create or re-point memberships
 
 `memberships.user_id` references `users(id)`, and **foreign key checks run without row level security**, so the database accepts the id of *any* existing user, including one that belongs to another tenant. `users_select` shows a user to anyone with a *visible* membership of that user. Together, with `INSERT` (or `UPDATE` of `user_id`) on `memberships` an admin of organization A who knew the UUID of a user that only belongs to organization B could add that user to A, then read the person's e-mail, name and `is_active`, and also tell which UUIDs exist from the foreign key error. This is exactly what the first review found (M1) and a test now reproduces and denies: with the grants removed, the `INSERT` and the `UPDATE` fail with `permission denied` *before* any foreign key is evaluated, so an existing and a made-up UUID get the identical error, and the user keeps 0 rows in `users`.
 
-Creating a membership is therefore **not an application-role operation**. It needs the invitation flow of **TASK-004**, implemented as a narrow `SECURITY DEFINER` function that checks who may invite whom and that the user is the invitee, decided in its own ADR (`SECURITY DEFINER` is deliberately absent from this task and a test enforces that). Until then the seed and the owner create memberships; the policy `memberships_insert` exists for the owner (and is what the isolation matrix uses to prove `FORCE`).
+Creating a membership is therefore **not an application-role operation**. It happens in the invitation flow: `accept_invitation(...)`, a narrow `SECURITY DEFINER` function (ADR-016; see [auth.md](auth.md)), creates the membership an invitation names. The seed and the owner create memberships too; the policy `memberships_insert` exists for the owner (and is what the isolation matrix uses to prove `FORCE`).
 
 `apm_app` cannot `ALTER TABLE`, `DISABLE ROW LEVEL SECURITY`, `DROP POLICY`, `CREATE` objects, `SET ROLE` to the owner or the admin, or read `pg_authid`; `SET row_security = off` makes a query error instead of bypassing the policies (all tested).
 
@@ -108,7 +108,7 @@ Creating a membership is therefore **not an application-role operation**. It nee
 
 ### Posture check
 
-Row level security only protects if the API connects as the unprivileged role and the database still has what the design assumes. `app/db/posture.py` checks, as `apm_app`: the current user *is* `apm_app` and is not a superuser, does not bypass RLS and cannot create roles, databases or replication; the four tables have RLS **enabled and forced**; no `SECURITY DEFINER` function exists outside a closed list (empty until TASK-004); `TEMPORARY` is not granted; the application role is a member of **no** role (`pg_auth_members`: not `apm_owner`, not a predefined role such as `pg_read_all_data`); the four tables are owned by `apm_owner`; and the policies are **exactly** the expected list (`EXPECTED_POLICIES`: table, name, command, role; all permissive). Every finding is a fixed code, never a value read from the database.
+Row level security only protects if the API connects as the unprivileged role and the database still has what the design assumes. `app/db/posture.py` checks, as `apm_app`: the current user *is* `apm_app` and is not a superuser, does not bypass RLS and cannot create roles, databases or replication; the four tables have RLS **enabled and forced**; no `SECURITY DEFINER` function exists outside the closed list (the three of [auth.md](auth.md)); `TEMPORARY` is not granted; the application role is a member of **no** role (`pg_auth_members`: not `apm_owner`, not a predefined role such as `pg_read_all_data`); the four tables are owned by `apm_owner`; and the policies are **exactly** the expected list (`EXPECTED_POLICIES`: table, name, command, role; all permissive). Every finding is a fixed code, never a value read from the database.
 
 - **At startup**, outside `ENV=test`, the API refuses to start on any finding, and also when the database cannot be reached (it fails closed: serving without knowing is what the check prevents).
 - **In readiness**, only the cheap part runs (who am I: `apm_app`, not superuser, no `BYPASSRLS`): the probe answers 503 if the role is loosened while the API runs.
@@ -144,7 +144,7 @@ Both URLs go through the **same** validation (`validate_database_url`): the `@`-
 ## Accepted risks (ADR-014)
 
 - **The context setting can be forged by arbitrary SQL run as `apm_app`** (`set_config` is public). Row level security protects against **bugs in the application** (a forgotten `WHERE`, a wrong join), **not** against SQL injection or remote code execution. Mitigations: SQL is always parameterized, grants are minimal, `password_hash` is unreadable.
-- **Reading without a context is denied, so some flows need their own ADR**: resolving a school by its public slug (ADR-010) and finding a user by e-mail at login (TASK-004) both happen before a tenant is known. The answer is a narrow `SECURITY DEFINER` function or a dedicated role, decided and reviewed on its own, not a bypass switch here.
+- **Reading without a context is denied, so some flows need their own ADR**: resolving a school by its public slug (ADR-010) and finding a user by e-mail at login (`find_login_identity`, TASK-004) both happen before a tenant is known. The answer is a narrow `SECURITY DEFINER` function or a dedicated role, decided and reviewed on its own, not a bypass switch here.
 - **Creating organizations, users and memberships is not possible as `apm_app`** (no `INSERT` grant; see "Why `apm_app` cannot create or re-point memberships"). Platform and invitation flows come with their own ADRs.
 - **`updated_at` is maintained by the ORM** (`onupdate`), not by a trigger, so raw SQL updates do not touch it.
 - **The seed runs as the admin**, a superuser in development, so it bypasses row level security by design. It refuses `ENV=production` before connecting and creates fake data only.
@@ -161,5 +161,5 @@ None of these is reachable through the application's own parameterized queries. 
 - **`pg_terminate_backend` and `pg_cancel_backend`** work on any other session of the same role, so one session can kill requests of other tenants.
 - **Large objects, `LISTEN`/`NOTIFY` and advisory locks are global to the database.** A large object created in a session of one tenant is readable from a session of another (same role); a `NOTIFY` reaches any `LISTEN`er; a held advisory lock blocks everyone who asks for the same key. The application uses none of them.
 - **No `CONNECTION LIMIT` on `apm_app`** (`rolconnlimit = -1`), and no `statement_timeout` or `idle_in_transaction_session_timeout`: a runaway session can starve the others. Limits are set with the infrastructure (TASK-010).
-- **A school-scoped context can, at the database level, rename its organization and delete memberships of its school** (the `organizations` update policy checks only the organization, and the memberships delete policy only the scope). The database cannot tell *who* is acting: the permission matrix by role in code (TASK-004) must forbid a school-level role from doing either.
+- **A school-scoped context can, at the database level, rename its organization and delete memberships of its school** (the `organizations` update policy checks only the organization, and the memberships delete policy only the scope). The database cannot tell *who* is acting: the permission matrix by role in code (`app/auth/permissions.py`) must forbid a school-level role from doing either.
 - **The `TEMPORARY` privilege is revoked, but a superuser-created database default or a future `GRANT` could bring it back**: the posture check reports `temporary_allowed`.

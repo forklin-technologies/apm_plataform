@@ -191,6 +191,10 @@ Four transaction-local settings, applied with `set_config(..., true)` and bound 
 
 The financial schema's audit triggers read `app.request_id`, `app.actor_type` and `app.user_id` (ADR-015). Each value can be bound **once** per database session: binding a different one raises, so a session never changes who it acts for midway.
 
+## Logs
+
+No log line, error or traceback of the API carries a password, a hash, a token or a cookie: error texts are fixed, unexpected errors are logged by **class and request id only**, and the engine is built with `hide_parameters=True`, so even a failing statement does not print the values bound to it. One setting is the operator's to respect: SQLAlchemy at **DEBUG** on the `sqlalchemy.engine` logger prints the **result rows** of every query, and those hold password hashes (`find_login_identity`) and session ids. Never enable it in production; INFO (what `echo=True` does) prints the statements with the parameters hidden, and the leak test runs under it.
+
 ## E-mail: the outbox
 
 `EmailSender` is an interface; the only implementation, for development, writes each message as a file with mode `0600` in the directory `OUTBOX_DIR` (mode `0700`; a docker volume in compose, outside the repository). An invitation message contains the accept link, hence the token: that is why it is **development only** and the API **refuses to start with `ENV=production`** until a real sender exists. The password-changed notice never contains a password. A failing outbox is logged without content and does not undo the operation.

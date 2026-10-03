@@ -146,8 +146,9 @@ apps/api/
     main.py          create_app() factory (run with uvicorn --factory)
     core/config.py   Settings (API) and AdminSettings (tools); shared, leak-proof URL validation
     db/              Base (naming convention), engine/session factory, get_db, tenant context helper
-    routers/         HTTP layer; everything mounted under /api (deps.py: example tenant dependency, 401)
-    models/          Organization, School, User, Membership
+    routers/         HTTP layer; everything mounted under /api (v1/: auth and invitations; deps.py: tenant context of the session)
+    auth/            sessions, passwords, CSRF, rate limit, permissions, the three definer functions' callers (docs/auth.md)
+    models/          Organization, School, User, Membership, Session, LoginAttempt, Invitation
     schemas/         Pydantic request/response models
     services/        business rules (empty for now)
     repositories/    data access (empty for now)
