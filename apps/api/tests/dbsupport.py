@@ -110,6 +110,7 @@ FINANCIAL_TABLES = (
     "audit_logs",
     "webhook_events",
     "pix_charges",
+    "payment_accounts",
     "expense_attachments",
     "monthly_closings",
     "refunds",

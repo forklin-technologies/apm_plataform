@@ -8,7 +8,7 @@ cleaned up. The deferred consistency trigger then never runs on its own; call `c
 to run it on purpose.
 """
 
-# ruff: noqa: E501  (SQL text)
+# ruff: noqa: E501, S608  (SQL text; the f-string SQL only names columns of this module)
 
 import hashlib
 import uuid
@@ -34,9 +34,19 @@ def end_to_end_id() -> str:
     return "E" + uuid.uuid4().hex[:31]
 
 
+DEFAULT_CATEGORIES = (
+    # key, name, applies_to, report_group (the defaults of the product document)
+    ("parent_contribution", "Contribuição de pais", "IN", "CONTRIBUTIONS"),
+    ("donation", "Doações", "IN", "OTHER_INCOME"),
+    ("school_supplies", "Compra de material", "OUT", "EXPENSES_REIMBURSEMENTS"),
+    ("teacher_reimbursement", "Reembolso de professor", "OUT", "EXPENSES_REIMBURSEMENTS"),
+    ("refund", "Devolução", "IN", "REFUNDS"),
+)
+
+
 @dataclass(frozen=True)
 class Fresh:
-    """A school of its own, with an organization, three members and one category per direction."""
+    """A school of its own, with an organization, three members, a payment account and categories."""
 
     org: uuid.UUID
     school: uuid.UUID
@@ -44,8 +54,39 @@ class Fresh:
     treasurer: uuid.UUID  # a membership of the school
     staff: uuid.UUID  # a membership of the school
     outsider: uuid.UUID  # a user with no membership at all
-    cat_in: uuid.UUID
-    cat_out: uuid.UUID
+    account: uuid.UUID  # the ACTIVE payment account of the school
+    cat_in: uuid.UUID  # parent_contribution (IN, group CONTRIBUTIONS)
+    cat_other: uuid.UUID  # donation (IN, group OTHER_INCOME)
+    cat_out: uuid.UUID  # school_supplies (OUT)
+    cat_reimb: uuid.UUID  # teacher_reimbursement (OUT)
+    cat_refund: uuid.UUID  # refund (IN, group REFUNDS)
+
+
+def create_categories(conn: Connection, org: uuid.UUID, school: uuid.UUID) -> dict[str, uuid.UUID]:
+    ids: dict[str, uuid.UUID] = {}
+    for key, name, applies_to, group in DEFAULT_CATEGORIES:
+        ids[key] = conn.execute(
+            text(
+                "INSERT INTO categories (organization_id, school_id, key, name, applies_to, "
+                "report_group) VALUES (:o, :s, :k, :n, :a, :g) RETURNING id"
+            ),
+            {"o": org, "s": school, "k": key, "n": name, "a": applies_to, "g": group},
+        ).scalar_one()
+    return ids
+
+
+def create_account(
+    conn: Connection, org: uuid.UUID, school: uuid.UUID, *, status: str = "ACTIVE"
+) -> uuid.UUID:
+    account: uuid.UUID = conn.execute(
+        text(
+            "INSERT INTO payment_accounts (organization_id, school_id, provider, external_account_id, "
+            "status, secret_ref, webhook_secret_hash) "
+            "VALUES (:o, :s, 'SANDBOX', :e, :st, 'env:T5_SANDBOX_SECRET', :h) RETURNING id"
+        ),
+        {"o": org, "s": school, "e": uuid.uuid4().hex[:12], "st": status, "h": token_hash()},
+    ).scalar_one()
+    return account
 
 
 def make_school(conn: Connection, *, timezone: str | None = None) -> Fresh:
@@ -79,15 +120,8 @@ def make_school(conn: Connection, *, timezone: str | None = None) -> Fresh:
             ),
             {"user": people[name], "org": org, "school": school_id, "role": role},
         )
-    cat_in, cat_out = uuid.uuid4(), uuid.uuid4()
-    for category, key, applies_to in ((cat_in, "t5_in", "IN"), (cat_out, "t5_out", "OUT")):
-        conn.execute(
-            text(
-                "INSERT INTO categories (id, organization_id, school_id, key, name, applies_to) "
-                "VALUES (:id, :org, :school, :key, :key, :applies_to)"
-            ),
-            {"id": category, "org": org, "school": school, "key": key, "applies_to": applies_to},
-        )
+    categories = create_categories(conn, org, school)
+    account = create_account(conn, org, school)
     if timezone is not None:
         conn.execute(
             text("UPDATE school_settings SET timezone = :tz WHERE school_id = :school"),
@@ -100,8 +134,12 @@ def make_school(conn: Connection, *, timezone: str | None = None) -> Fresh:
         treasurer=people["treasurer"],
         staff=people["staff"],
         outsider=people["outsider"],
-        cat_in=cat_in,
-        cat_out=cat_out,
+        account=account,
+        cat_in=categories["parent_contribution"],
+        cat_other=categories["donation"],
+        cat_out=categories["school_supplies"],
+        cat_reimb=categories["teacher_reimbursement"],
+        cat_refund=categories["refund"],
     )
 
 
@@ -130,15 +168,30 @@ def add_transaction(
     settled_at: datetime | None = None,
     parent: uuid.UUID | None = None,
     parent_kind: str | None = None,
+    origin_type: str | None = None,
+    origin_name: str | None = None,
+    origin_user_id: uuid.UUID | None = None,
 ) -> uuid.UUID:
+    default_category = {
+        "CONTRIBUTION": fresh.cat_in,
+        "EXPENSE": fresh.cat_out,
+        "REIMBURSEMENT": fresh.cat_reimb,
+        "REFUND": fresh.cat_refund,
+    }[kind]
+    default_origin = {
+        "CONTRIBUTION": "GUARDIAN",
+        "EXPENSE": "TEACHER",
+        "REIMBURSEMENT": "TEACHER",
+        "REFUND": "TEACHER",
+    }[kind]
     return conn.execute(
         text(
             "INSERT INTO financial_transactions (organization_id, school_id, kind, direction, "
-            "amount_cents, status, category_id, occurred_at, settled_at, parent_transaction_id, "
-            "parent_kind, created_by_user_id) "
-            "VALUES (:org, :school, :kind, :direction, :amount, :status, :category, "
-            "coalesce(:occurred_at, now()), :settled_at, :parent, :parent_kind, :created_by) "
-            "RETURNING id"
+            "amount_cents, status, category_id, origin_type, origin_name, origin_user_id, "
+            "occurred_at, settled_at, parent_transaction_id, parent_kind, created_by_user_id) "
+            "VALUES (:org, :school, :kind, :direction, :amount, :status, :category, :origin_type, "
+            ":origin_name, :origin_user, coalesce(:occurred_at, now()), :settled_at, :parent, "
+            ":parent_kind, :created_by) RETURNING id"
         ),
         {
             "org": fresh.org,
@@ -147,7 +200,10 @@ def add_transaction(
             "direction": direction,
             "amount": amount,
             "status": status,
-            "category": category,
+            "category": category or default_category,
+            "origin_type": origin_type or default_origin,
+            "origin_name": origin_name,
+            "origin_user": origin_user_id,
             "occurred_at": occurred_at,
             "settled_at": settled_at,
             "parent": parent,
@@ -155,6 +211,15 @@ def add_transaction(
             "created_by": created_by,
         },
     ).scalar_one()
+
+
+def set_status(
+    conn: Connection, tx: uuid.UUID, status: str, settled_at: datetime | None = None
+) -> None:
+    conn.execute(
+        text("UPDATE financial_transactions SET status = :s, settled_at = :at WHERE id = :t"),
+        {"s": status, "at": settled_at, "t": tx},
+    )
 
 
 def add_cash_contribution(
@@ -166,8 +231,13 @@ def add_cash_contribution(
     guardian: str | None = None,
     student: str | None = None,
     class_name: str | None = None,
+    email: str | None = None,
+    phone: str | None = None,
+    method: str = "CASH",
+    category: uuid.UUID | None = None,
+    origin_type: str = "GUARDIAN",
 ) -> uuid.UUID:
-    """A cash contribution is born PAID and records who entered it."""
+    """A manual contribution (cash, transfer, other) is born PAID and records who entered it."""
     tx = add_transaction(
         conn,
         fresh,
@@ -175,24 +245,28 @@ def add_cash_contribution(
         direction="IN",
         amount=amount,
         status="PAID",
-        category=fresh.cat_in,
+        category=category or fresh.cat_in,
         created_by=fresh.treasurer,
         occurred_at=settled_at,
         settled_at=settled_at,
+        origin_type=origin_type,
     )
     conn.execute(
         text(
             "INSERT INTO contributions (transaction_id, organization_id, school_id, method, "
-            "guardian_name, student_name, class_name) "
-            "VALUES (:tx, :org, :school, 'CASH', :guardian, :student, :class_name)"
+            "guardian_name, student_name, class_name, contributor_email, contributor_phone) "
+            "VALUES (:tx, :org, :school, :method, :guardian, :student, :class_name, :email, :phone)"
         ),
         {
             "tx": tx,
             "org": fresh.org,
             "school": fresh.school,
+            "method": method,
             "guardian": guardian,
             "student": student,
             "class_name": class_name,
+            "email": email,
+            "phone": phone,
         },
     )
     return tx
@@ -210,7 +284,6 @@ def add_pix_contribution(
         direction="IN",
         amount=amount,
         status="PENDING_PAYMENT",
-        category=fresh.cat_in,
     )
     conn.execute(
         text(
@@ -222,15 +295,16 @@ def add_pix_contribution(
     )
     charge: uuid.UUID = conn.execute(
         text(
-            "INSERT INTO pix_charges (organization_id, school_id, transaction_id, provider, txid, "
-            "amount_cents, expires_at) "
-            "VALUES (:org, :school, :tx, 'SANDBOX', :txid, :amount, now() + interval '30 minutes') "
-            "RETURNING id"
+            "INSERT INTO pix_charges (organization_id, school_id, transaction_id, payment_account_id, "
+            "provider, txid, amount_cents, expires_at) "
+            "VALUES (:org, :school, :tx, :account, 'SANDBOX', :txid, :amount, "
+            "now() + interval '30 minutes') RETURNING id"
         ),
         {
             "org": fresh.org,
             "school": fresh.school,
             "tx": tx,
+            "account": fresh.account,
             "txid": uuid.uuid4().hex,
             "amount": amount,
         },
@@ -238,19 +312,58 @@ def add_pix_contribution(
     if paid_at is not None:
         conn.execute(
             text(
-                "UPDATE pix_charges SET status = 'PAID', end_to_end_id = :e2e, paid_at = :paid_at "
-                "WHERE id = :id"
+                "UPDATE pix_charges SET status = 'PAID', end_to_end_id = :e2e, paid_at = :paid_at, "
+                "received_amount_cents = :amount WHERE id = :id"
             ),
-            {"e2e": end_to_end_id(), "paid_at": paid_at, "id": charge},
+            {"e2e": end_to_end_id(), "paid_at": paid_at, "amount": amount, "id": charge},
         )
-        conn.execute(
-            text(
-                "UPDATE financial_transactions SET status = 'PAID', settled_at = :paid_at "
-                "WHERE id = :id"
-            ),
-            {"paid_at": paid_at, "id": tx},
-        )
+        set_status(conn, tx, "PAID", paid_at)
     return tx, charge
+
+
+def add_pix_review(
+    conn: Connection, fresh: Fresh, amount: int, received: int, *, paid_at: datetime | None = None
+) -> tuple[uuid.UUID, uuid.UUID]:
+    """A Pix whose received amount differs from the expected one: the charge is REVIEW_REQUIRED and
+    so is the contribution (the management decides). Returns (transaction, charge)."""
+    tx, charge = add_pix_contribution(conn, fresh, amount)
+    conn.execute(
+        text(
+            "UPDATE pix_charges SET status = 'REVIEW_REQUIRED', end_to_end_id = :e2e, "
+            "paid_at = :at, received_amount_cents = :r, divergence_reason = 'received amount differs' "
+            "WHERE id = :id"
+        ),
+        {
+            "e2e": end_to_end_id(),
+            "at": paid_at or utc(2025, 3, 10, 15),
+            "r": received,
+            "id": charge,
+        },
+    )
+    set_status(conn, tx, "REVIEW_REQUIRED")
+    return tx, charge
+
+
+def add_attachment(
+    conn: Connection, fresh: Fresh, expense: uuid.UUID, kind: str = "INVOICE"
+) -> uuid.UUID:
+    attachment: uuid.UUID = conn.execute(
+        text(
+            "INSERT INTO expense_attachments (organization_id, school_id, transaction_id, kind, "
+            "storage_key, file_name, content_type, size_bytes, sha256, uploaded_by_user_id) "
+            "VALUES (:o, :s, :t, :kind, :key, 'nota.pdf', 'application/pdf', 1024, :h, :u) RETURNING id"
+        ),
+        {
+            "o": fresh.org,
+            "s": fresh.school,
+            "t": expense,
+            "kind": kind,
+            "key": f"k/{uuid.uuid4().hex}",
+            "h": token_hash(),
+            "u": fresh.staff,
+        },
+    ).scalar_one()
+    return attachment
 
 
 def add_expense(
@@ -262,26 +375,31 @@ def add_expense(
     status: str = "SUBMITTED",
     settled_at: datetime | None = None,
     occurred_at: datetime | None = None,
+    approved_amount: int | None = None,
+    attach: bool = True,
 ) -> uuid.UUID:
-    """An expense submitted by `staff` and decided by `treasurer` (never the same person)."""
+    """An expense submitted by `staff` and decided by `treasurer` (never the same person).
+
+    It is created the way the application creates it (DRAFT or SUBMITTED) and then taken through
+    the state machine to `status`, writing what each step records. Everything beyond DRAFT carries
+    an attachment (the deferred consistency check requires one)."""
+    start = "DRAFT" if status in ("DRAFT", "CANCELLED") else "SUBMITTED"
     tx = add_transaction(
         conn,
         fresh,
         kind="EXPENSE",
         direction="OUT",
         amount=amount,
-        status=status,
-        category=fresh.cat_out,
+        status=start,
         created_by=fresh.staff,
         occurred_at=occurred_at,
-        settled_at=settled_at,
+        origin_user_id=fresh.staff,
     )
-    decided = status in ("APPROVED", "REJECTED", "PAID")
     conn.execute(
         text(
             "INSERT INTO expenses (transaction_id, organization_id, school_id, description, "
-            "paid_by, submitted_by_user_id, approved_by_user_id, decision_reason) "
-            "VALUES (:tx, :org, :school, 'Material', :paid_by, :staff, :decider, :reason)"
+            "purchase_reason, payment_method, paid_by, submitted_by_user_id) "
+            "VALUES (:tx, :org, :school, 'Material', 'school project', 'CARD', :paid_by, :staff)"
         ),
         {
             "tx": tx,
@@ -289,10 +407,36 @@ def add_expense(
             "school": fresh.school,
             "paid_by": paid_by,
             "staff": fresh.staff,
-            "decider": fresh.treasurer if decided else None,
-            "reason": "no budget" if status == "REJECTED" else None,
         },
     )
+    if attach and start != "DRAFT":
+        add_attachment(conn, fresh, tx)
+    if status == "CANCELLED":
+        set_status(conn, tx, "CANCELLED")
+    elif status == "CORRECTION_REQUESTED":
+        conn.execute(
+            text(
+                "UPDATE expenses SET correction_reason = 'attach the receipt' WHERE transaction_id = :t"
+            ),
+            {"t": tx},
+        )
+        set_status(conn, tx, "CORRECTION_REQUESTED")
+    elif status in ("APPROVED", "REJECTED", "PAID"):
+        conn.execute(
+            text(
+                "UPDATE expenses SET approved_by_user_id = :u, approved_amount_cents = :a, "
+                "decision_reason = :r WHERE transaction_id = :t"
+            ),
+            {
+                "u": fresh.treasurer,
+                "a": None if status == "REJECTED" else (approved_amount or amount),
+                "r": "no budget" if status == "REJECTED" else None,
+                "t": tx,
+            },
+        )
+        set_status(conn, tx, "REJECTED" if status == "REJECTED" else "APPROVED")
+        if status == "PAID":
+            set_status(conn, tx, "PAID", settled_at)
     return tx
 
 
@@ -300,96 +444,128 @@ def add_reimbursement(
     conn: Connection,
     fresh: Fresh,
     expense: uuid.UUID,
-    amount: int,
+    amount: int | None = None,
     *,
     status: str = "PENDING",
     settled_at: datetime | None = None,
     reference: str | None = None,
 ) -> uuid.UUID:
+    """A reimbursement of an APPROVED collaborator expense, for the APPROVED amount (the default)."""
+    if amount is None:
+        amount = conn.execute(
+            text("SELECT approved_amount_cents FROM expenses WHERE transaction_id = :t"),
+            {"t": expense},
+        ).scalar_one()
     tx = add_transaction(
         conn,
         fresh,
         kind="REIMBURSEMENT",
         direction="OUT",
         amount=amount,
-        status=status,
+        status="PENDING",
         created_by=fresh.treasurer,
         occurred_at=settled_at,
-        settled_at=settled_at,
         parent=expense,
         parent_kind="EXPENSE",
+        origin_user_id=fresh.staff,
     )
     conn.execute(
         text(
             "INSERT INTO reimbursements (transaction_id, organization_id, school_id, "
-            "beneficiary_user_id, payment_reference) VALUES (:tx, :org, :school, :staff, :ref)"
+            "beneficiary_user_id) VALUES (:tx, :org, :school, :staff)"
         ),
-        {
-            "tx": tx,
-            "org": fresh.org,
-            "school": fresh.school,
-            "staff": fresh.staff,
-            "ref": reference,
-        },
+        {"tx": tx, "org": fresh.org, "school": fresh.school, "staff": fresh.staff},
     )
+    if status == "PAID":
+        conn.execute(
+            text(
+                "UPDATE reimbursements SET payment_reference = :r, paid_by_user_id = :u "
+                "WHERE transaction_id = :t"
+            ),
+            {"r": reference or "bank-ref-1", "u": fresh.treasurer, "t": tx},
+        )
+        set_status(conn, tx, "PAID", settled_at)
+    elif status == "CANCELLED":
+        set_status(conn, tx, "CANCELLED")
     return tx
 
 
 def add_collaborator_expense(
-    conn: Connection, fresh: Fresh, amount: int, *, reimbursed_at: datetime | None = None
+    conn: Connection,
+    fresh: Fresh,
+    amount: int,
+    *,
+    approved_amount: int | None = None,
+    reimbursed_at: datetime | None = None,
 ) -> tuple[uuid.UUID, uuid.UUID]:
-    """An expense paid by a collaborator, approved, and its reimbursement (PAID when reimbursed_at
-    is given). The expense itself never moves the cash. Returns (expense, reimbursement)."""
-    expense = add_expense(conn, fresh, amount, paid_by="COLLABORATOR", status="APPROVED")
-    if reimbursed_at is None:
-        return expense, add_reimbursement(conn, fresh, expense, amount)
-    reimbursement = add_reimbursement(
+    """An expense paid by a collaborator, approved (maybe partially), and its reimbursement (PAID
+    when reimbursed_at is given). The expense itself never moves the cash. Returns
+    (expense, reimbursement)."""
+    expense = add_expense(
         conn,
         fresh,
-        expense,
         amount,
-        status="PAID",
-        settled_at=reimbursed_at,
-        reference="bank-ref-1",
+        paid_by="COLLABORATOR",
+        status="APPROVED",
+        approved_amount=approved_amount,
     )
-    conn.execute(
-        text("UPDATE financial_transactions SET status = 'PAID', settled_at = :at WHERE id = :id"),
-        {"at": reimbursed_at, "id": expense},
+    if reimbursed_at is None:
+        return expense, add_reimbursement(conn, fresh, expense)
+    reimbursement = add_reimbursement(
+        conn, fresh, expense, status="PAID", settled_at=reimbursed_at, reference="bank-ref-1"
     )
+    set_status(conn, expense, "PAID", reimbursed_at)
     return expense, reimbursement
 
 
 def add_refund(
     conn: Connection,
     fresh: Fresh,
-    parent: uuid.UUID,
-    parent_kind: str,
     amount: int,
     *,
-    status: str = "PENDING",
+    parent: uuid.UUID | None = None,
+    parent_kind: str | None = None,
+    status: str = "REQUESTED",
     settled_at: datetime | None = None,
-    reference: str | None = None,
+    reason: str = "unused balance",
+    origin_type: str = "TEACHER",
+    origin_user_id: uuid.UUID | None = None,
+    origin_name: str | None = None,
 ) -> uuid.UUID:
+    """A devolução: money that comes BACK to the APM. The parent (an expense or a reimbursement) is
+    optional. Taken through REQUESTED, AWAITING_CONFIRMATION and CONFIRMED (or REJECTED)."""
     tx = add_transaction(
         conn,
         fresh,
         kind="REFUND",
-        direction="OUT" if parent_kind == "CONTRIBUTION" else "IN",
+        direction="IN",
         amount=amount,
-        status=status,
+        status="REQUESTED",
         created_by=fresh.treasurer,
         occurred_at=settled_at,
-        settled_at=settled_at,
         parent=parent,
         parent_kind=parent_kind,
+        origin_type=origin_type,
+        origin_user_id=origin_user_id,
+        origin_name=origin_name,
     )
     conn.execute(
         text(
-            "INSERT INTO refunds (transaction_id, organization_id, school_id, reason, "
-            "payment_reference) VALUES (:tx, :org, :school, 'duplicate payment', :ref)"
+            "INSERT INTO refunds (transaction_id, organization_id, school_id, reason) "
+            "VALUES (:tx, :org, :school, :reason)"
         ),
-        {"tx": tx, "org": fresh.org, "school": fresh.school, "ref": reference},
+        {"tx": tx, "org": fresh.org, "school": fresh.school, "reason": reason},
     )
+    if status in ("AWAITING_CONFIRMATION", "CONFIRMED"):
+        set_status(conn, tx, "AWAITING_CONFIRMATION")
+    if status == "CONFIRMED":
+        conn.execute(
+            text("UPDATE refunds SET confirmed_by_user_id = :u WHERE transaction_id = :t"),
+            {"u": fresh.treasurer, "t": tx},
+        )
+        set_status(conn, tx, "CONFIRMED", settled_at)
+    elif status == "REJECTED":
+        set_status(conn, tx, "REJECTED")
     return tx
 
 
@@ -404,24 +580,30 @@ def summary(
     conn: Connection, fresh: Fresh, start: date, end: date
 ) -> tuple[int, int, int, int, int]:
     """(opening, total_in, total_out, closing, entries_count) of the period."""
-    row = conn.execute(
-        text(
-            "SELECT opening_balance_cents, total_in_cents, total_out_cents, closing_balance_cents, "
-            "entries_count FROM statement_summary(:school, :start, :end)"
-        ),
+    row = summary_row(conn, fresh, start, end)
+    return (
+        row.opening_balance_cents,
+        row.total_in_cents,
+        row.total_out_cents,
+        row.closing_balance_cents,
+        row.entries_count,
+    )
+
+
+def summary_row(conn: Connection, fresh: Fresh, start: date, end: date) -> Any:
+    """The whole statement_summary row (every figure, both balances)."""
+    return conn.execute(
+        text("SELECT * FROM statement_summary(:school, :start, :end)"),
         {"school": fresh.school, "start": start, "end": end},
     ).one()
-    return tuple(row)  # type: ignore[return-value, unused-ignore]
 
 
-def entries(conn: Connection, fresh: Fresh, start: date, end: date) -> list[Any]:
-    return list(
-        conn.execute(
-            text(
-                "SELECT transaction_id, reference_code, kind, direction, signed_amount_cents, "
-                "opening_balance_cents, running_balance_cents, late_adjustment, local_date "
-                "FROM statement_entries(:school, :start, :end)"
-            ),
-            {"school": fresh.school, "start": start, "end": end},
-        )
-    )
+def entries(conn: Connection, fresh: Fresh, start: date, end: date, **filters: Any) -> list[Any]:
+    """statement_entries rows; filters: p_type, p_category, p_status, p_person."""
+    names = ", ".join(f":{name}" for name in ("school", "start", "end", *filters))
+    arguments = {"school": fresh.school, "start": start, "end": end, **filters}
+    sql = f"SELECT * FROM statement_entries({names})"
+    if filters:  # named notation, so that the optional filters can be given alone
+        named = ", ".join(f"{key} => :{key}" for key in filters)
+        sql = f"SELECT * FROM statement_entries(:school, :start, :end, {named})"
+    return list(conn.execute(text(sql), arguments))
