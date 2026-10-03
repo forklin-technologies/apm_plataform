@@ -304,7 +304,7 @@ def test_the_application_role_still_reads_everything_else_and_can_rotate_the_has
             ),
             {"a": ledger.payment_account},
         ).one()
-        assert row.secret_ref == "env:T5_SANDBOX_SECRET"
+        assert row.secret_ref == "env:T5_SANDBOX_SECRET"  # noqa: S105 (a reference to the secret, not the secret)
         updated = conn.execute(
             text("UPDATE payment_accounts SET webhook_secret_hash = :h WHERE id = :a"),
             {"h": new_hash, "a": ledger.payment_account},
