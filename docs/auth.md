@@ -34,8 +34,8 @@ The active membership in a response carries the **permissions** of its role, so 
 3. The link (`PUBLIC_BASE_URL/accept-invitation?token=...`) is written to the **outbox** (see [E-mail](#e-mail-the-outbox)).
 4. The invitee calls `POST /invitations/accept`.
    - **New person** (no account with that e-mail): sends `token`, `full_name`, `password`. The function creates the user and the membership and consumes the invitation in one transaction. There is **no automatic login**; the person logs in next.
-   - **Existing account**: must be **logged in** as that account and sends only `{token}`. The token alone never lets anyone act as an existing account (anti-takeover). Without a session the answer is `409 account_exists_login_required`.
-   - Every other failure (unknown, malformed, already used, revoked, expired, inactive account, already a member) is the **same** `400 invitation_invalid`: no oracle on which tokens exist.
+   - **Existing account**: must be **logged in** as that account and sends only `{token}`. The token alone never lets anyone act as an existing account (anti-takeover). Without a session, **or logged in as a different account than the invited e-mail's**, the answer is `409 account_exists_login_required` (not `400`).
+   - Every other failure (unknown, malformed, already used, revoked, expired, inactive account, already a member) is the **same** `400 invitation_invalid`: no oracle on which tokens exist. (The one exception is the `409` above, which only says that an account exists for the e-mail the token is for, to someone who already holds the token.)
 
 ### Login, `me`, switching context
 
@@ -53,7 +53,7 @@ The active membership in a response carries the **permissions** of its role, so 
 | | |
 | --- | --- |
 | Token | `secrets.token_urlsafe(32)`: 256 bits, 43 characters of the URL-safe alphabet. Anything that does not look like one is rejected before the database is touched. |
-| In the database | `sessions.id = SHA-256(token)`. Knowing it authenticates nobody. |
+| In the database | `sessions.id = SHA-256(token)`. Knowing it authenticates nobody (reading it; **writing** a session row is another matter, see R7). |
 | Idle expiry | 30 minutes without a request (`last_seen_at`, written at most once a minute). |
 | Absolute expiry | 12 hours from login; context switches keep it. |
 | Rotation | on login and on context switch (new token, old one revoked). |
@@ -193,7 +193,11 @@ The financial schema's audit triggers read `app.request_id`, `app.actor_type` an
 
 ## Logs
 
-No log line, error or traceback of the API carries a password, a hash, a token or a cookie: error texts are fixed, unexpected errors are logged by **class and request id only**, and the engine is built with `hide_parameters=True`, so even a failing statement does not print the values bound to it. One setting is the operator's to respect: SQLAlchemy at **DEBUG** on the `sqlalchemy.engine` logger prints the **result rows** of every query, and those hold password hashes (`find_login_identity`) and session ids. Never enable it in production; INFO (what `echo=True` does) prints the statements with the parameters hidden, and the leak test runs under it.
+No log line, error or traceback of the API carries a password, a hash, a token or a cookie: error texts are fixed, the API's own log line for an unexpected error carries the exception **class and the request id only**, and the engine is built with `hide_parameters=True`, so even a failing statement does not print the values bound to it. Three things to know:
+
+- **uvicorn also logs the full traceback** of an unexpected error, with the **message of the exception** (`ServerErrorMiddleware` re-raises after the API answered 500). The code therefore must never put a request value in an exception message; a static test covers the API's own log calls, not the text of exceptions that libraries raise.
+- SQLAlchemy at **DEBUG** on `sqlalchemy.engine` prints the **result rows** of every query, and those hold password hashes (`find_login_identity`) and session ids. When the application builds its engine it raises `sqlalchemy.engine` and `sqlalchemy.engine.Engine` to INFO if they were lower, so an operator who turns the SQL log up to DEBUG still does not get rows. A level set **after** the engine was built (a late `dictConfig`) is not undone: do not set it.
+- INFO (what `echo=True` does) prints the statements with the parameters hidden. The leak test runs under it.
 
 ## E-mail: the outbox
 
@@ -242,7 +246,7 @@ The map role to permissions is **code**, `ROLE_PERMISSIONS` in `app/auth/permiss
 
 | Threat | What stops it |
 | --- | --- |
-| Theft of the sessions table (a backup, a read-only SQL injection) | only `SHA-256(token)` is stored; a hash does not authenticate |
+| Theft of the sessions table (a backup, a read-only SQL injection) | only `SHA-256(token)` is stored; a hash does not authenticate. This is about **reading** the table; forging a row through SQL is R7 |
 | Session fixation | the server never accepts an id from the client: login always issues a new token and revokes a presented one |
 | Reuse of a revoked, expired, idle or rotated token | the session read excludes them; tests present each |
 | Stolen cookie | `HttpOnly`, `Secure`, 30 min idle, 12 h absolute, revoked on password change |
@@ -261,17 +265,36 @@ The map role to permissions is **code**, `ROLE_PERMISSIONS` in `app/auth/permiss
 | Rate limits that become a lock-out of everyone | decisions from the submitted value only; a wrong `FORWARDED_ALLOW_IPS` is the one way (R5) |
 | A new route that forgot its access rule | the route-walk test (below) |
 
-Not done here, on purpose: **2FA** (mandatory for `treasurer`, `school_admin` and `organization_admin` before any production with real money, ADR-016, planned for a later phase), **password recovery by e-mail**, OAuth, a real e-mail sender, auditing of the authentication events (the hook is in the password change), and a breached-password list.
+Not done here, on purpose: a **retention job** (see [Known limits](#known-limits-and-operational-notes)), **2FA** (mandatory for `treasurer`, `school_admin` and `organization_admin` before any production with real money, ADR-016, planned for a later phase), **password recovery by e-mail**, OAuth, a real e-mail sender, auditing of the authentication events (the hook is in the password change), and a breached-password list.
 
 ## Accepted risks
 
 1. **R1. `find_login_identity` hands the password hash to `apm_app`.** An attacker with arbitrary SQL as the application role can fetch the hash of a known e-mail and attack it offline. The ADR accepted it; Argon2id makes it expensive. Mitigation: SQL is always parameterised, and there is no way to list e-mails.
 2. **R2. A cookie that is not `Secure` in development.** `COOKIE_SECURE=false` exists for WebKit over http and removes the `__Host-` protection. It is allowed only for `ENV` `development` and `test`; the API refuses to start in production without `true`. The proper fix is the TLS proxy of the deployment task.
 3. **R3. A session with no membership (`membership_id` NULL).** A user with several memberships has a valid session before choosing one. Such a session has no tenant context, sees nothing tenant-owned, and every role-protected route answers `409 context_required`. It can read `me`, switch context and change its password.
-4. **R4. `users_update_self` lets `apm_app` change its own password hash.** The column grant is `password_hash, updated_at`, the policy limits it to the row of `app.user_id`. With arbitrary SQL it is the forged setting of R7 that picks the row. Mitigation: a password change revokes every session and tells the user through the outbox.
+4. **R4. `users_update_self` lets `apm_app` change its own password hash.** The column grant is `password_hash, updated_at`, the policy limits it to the row of `app.user_id`. With arbitrary SQL it is the forged setting of R7 that picks the row. Through the **endpoint** a password change revokes every session and tells the user through the outbox; through SQL it does neither (R7).
 5. **R5. The client IP behind a proxy.** If `FORWARDED_ALLOW_IPS` does not hold exactly the proxy's address, the IP limits become a limit on the proxy (everyone shares one block) or, with too wide a list, the IP can be forged. It is documented above and tested for the case without a proxy.
 6. **R6. An invitation for an existing account needs a login.** Anyone who holds the token of an invitation addressed to an e-mail that already has an account cannot use it without being that account. The cost is one extra step for that person; the benefit is that a leaked link cannot take over an account.
-7. **R7. A forgeable setting (same nature as ADR-014).** With arbitrary SQL as `apm_app`, an attacker can set `app.user_id` and read the sessions, or change the password, of any user, exactly as they could set `app.organization_id` in ADR-014. Row level security protects against **application bugs**, not against SQL injection. Mitigations: parameterised SQL everywhere, per-column grants, the session id in the database is a hash (knowing it authenticates nobody), and a password change revokes every session and notifies the user.
+7. **R7. A forgeable setting (same nature as ADR-014), and what it buys an attacker here.** With arbitrary SQL as `apm_app` (a SQL injection, say), an attacker can set `app.user_id` to any user's id, exactly as they could set `app.organization_id` in ADR-014. Row level security protects against **application bugs**, not against SQL injection. In this task the forged setting is worth more than it was there:
+   - **A forged session.** The policy `sessions_insert` only asks that `user_id = app_user_id()`, so the attacker can `INSERT` a session for **any user, with a token of their own choosing**. That is complete and persistent impersonation: no password is needed or changed, the user is not notified, nothing is revoked, and the session lives until it expires.
+   - **Reading memberships.** `list_memberships_for_user(p_user_id)` does not tie its argument to `app.user_id`, so the memberships (organizations, schools, roles) of any user can be read by uuid.
+   - Reading or changing the password hash of any user, through `users_select_self` and `users_update_self` (R4).
+   - What does **not** hold: "the session id in the database is a hash, so knowing it authenticates nobody" is true only for **reading** that column. It says nothing about **writing** a row. And "a password change revokes every session and notifies the user" is a property of the **endpoint** `POST /auth/password`; the SQL path does neither.
+   - Mitigations that do hold today: parameterised SQL everywhere (a static test), per-column grants, no `INSERT` on `memberships` or `DELETE` on `sessions` for the application role.
+   - **Mitigation decided and deferred (before 2FA and before production):** `sessions.id` becomes `HMAC-SHA256(key derived from AUTH_SECRET, token)` instead of a plain SHA-256. It needs **no migration** (the column stays 32 bytes). A session row forged through SQL would carry an id the attacker cannot compute without the secret, which the database never holds, so it would never validate. It matters most for 2FA: a forged session would **skip** the second factor.
+
+## Known limits and operational notes
+
+Known and accepted for this task; the first two are for the retention job that must exist before production.
+
+- **`login_attempts` older than 7 days are never deleted by the application.** The `SELECT` policy shows 7 days and a `DELETE ... WHERE` has to see the row it deletes, so the application removes rows older than 24 hours **that it can still see**; anything older than a week is invisible to it and stays. Rows hold only HMACs, never an e-mail or an IP.
+- **`sessions` is never deleted and keeps the IP and a hash of the user agent without a time limit.** The application role has no `DELETE` on it, and nothing purges old rows. That is personal data kept with no end date (LGPD): a retention job (with its own role) must purge expired and revoked sessions before production.
+- **No limit on the size of a request body.** The reverse proxy must set one (`client_max_body_size` in nginx, the equivalent elsewhere); the API only bounds the length of each field.
+- **The invitation limit is per IP**, so a whole school behind one NAT address shares it; guessing tokens must not be able to lock other people out, which is why it is not per token.
+- **The per-e-mail login limit lets a distributed attacker lock one e-mail** (30 failures an hour from any addresses). The cost of that is a delayed login for one person, not access; the alternative (limiting only by IP) is worse against credential stuffing.
+- **`ENV=test` turns the posture check off and accepts a cookie without `Secure`.** It exists for the test suite and must never be used where real people log in.
+- **There is no cap on the number of live sessions per user.**
+- **With the database down the routes answer `500`**; only `GET /api/health/ready` answers `503`.
 
 ## Adding a route
 
