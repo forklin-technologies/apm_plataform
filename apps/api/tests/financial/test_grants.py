@@ -26,6 +26,9 @@ INSERTABLE: dict[str, set[str]] = {
         "amount_cents",
         "status",
         "category_id",
+        "origin_type",
+        "origin_name",
+        "origin_user_id",
         "occurred_at",
         "settled_at",
         "parent_transaction_id",
@@ -40,6 +43,8 @@ INSERTABLE: dict[str, set[str]] = {
         "guardian_name",
         "student_name",
         "class_name",
+        "contributor_email",
+        "contributor_phone",
         "receipt_token_hash",
         "receipt_expires_at",
     },
@@ -49,6 +54,8 @@ INSERTABLE: dict[str, set[str]] = {
         "school_id",
         "description",
         "vendor",
+        "purchase_reason",
+        "payment_method",
         "paid_by",
         "submitted_by_user_id",
     },
@@ -58,6 +65,7 @@ INSERTABLE: dict[str, set[str]] = {
         "organization_id",
         "school_id",
         "transaction_id",
+        "kind",
         "storage_key",
         "file_name",
         "content_type",
@@ -65,24 +73,44 @@ INSERTABLE: dict[str, set[str]] = {
         "sha256",
         "uploaded_by_user_id",
     },
-    "categories": {"organization_id", "school_id", "key", "name", "applies_to", "is_active"},
+    "categories": {
+        "organization_id",
+        "school_id",
+        "key",
+        "name",
+        "applies_to",
+        "report_group",
+        "is_active",
+    },
     "school_settings": {
         "school_id",
         "organization_id",
         "timezone",
         "min_contribution_cents",
         "max_contribution_cents",
+        "suggested_amounts_cents",
+        "allow_custom_amount",
         "pix_expiration_minutes",
-        "identification_mode",
         "required_fields",
+        "optional_fields",
         "brand_accent",
         "brand_accent_contrast",
         "approval_limit_cents",
+    },
+    "payment_accounts": {
+        "organization_id",
+        "school_id",
+        "provider",
+        "external_account_id",
+        "status",
+        "secret_ref",
+        "webhook_secret_hash",
     },
     "pix_charges": {
         "transaction_id",
         "organization_id",
         "school_id",
+        "payment_account_id",
         "provider",
         "txid",
         "status",
@@ -105,45 +133,94 @@ INSERTABLE: dict[str, set[str]] = {
         "action",
         "entity_type",
         "entity_id",
+        "entity_reference",
         "before_data",
         "after_data",
     },
     "monthly_closings": {"organization_id", "school_id", "period_start", "closed_by_user_id"},
 }
 
-# Never id, organization_id, school_id, kind, amount_cents, direction or a parent (the M1 lesson).
+# Never id, organization_id, school_id, kind, direction or a parent (the M1 lesson). The amount, the
+# category and the date are updatable only because ft_07_change allows them in a narrow window.
 UPDATABLE: dict[str, set[str]] = {
-    "financial_transactions": {"status", "settled_at", "updated_at"},
-    "contributions": {"guardian_name", "student_name", "class_name", "updated_at"},
-    "expenses": {"description", "vendor", "approved_by_user_id", "decision_reason", "updated_at"},
-    "reimbursements": {"payment_reference", "updated_at"},
-    "refunds": {"payment_reference", "updated_at"},
+    "financial_transactions": {
+        "status",
+        "settled_at",
+        "amount_cents",
+        "category_id",
+        "occurred_at",
+        "updated_at",
+    },
+    "contributions": {
+        "guardian_name",
+        "student_name",
+        "class_name",
+        "contributor_email",
+        "contributor_phone",
+        "review_decision_reason",
+        "updated_at",
+    },
+    "expenses": {
+        "description",
+        "vendor",
+        "purchase_reason",
+        "payment_method",
+        "approved_by_user_id",
+        "approved_amount_cents",
+        "decision_reason",
+        "correction_reason",
+        "updated_at",
+    },
+    "reimbursements": {"payment_reference", "paid_by_user_id", "updated_at"},
+    "refunds": {"payment_reference", "confirmed_by_user_id", "updated_at"},
     "expense_attachments": set(),
     "categories": {"name", "is_active", "updated_at"},
     "school_settings": {
         "timezone",
         "min_contribution_cents",
         "max_contribution_cents",
+        "suggested_amounts_cents",
+        "allow_custom_amount",
         "pix_expiration_minutes",
-        "identification_mode",
         "required_fields",
+        "optional_fields",
         "brand_accent",
         "brand_accent_contrast",
         "approval_limit_cents",
         "updated_at",
     },
-    "pix_charges": {"status", "end_to_end_id", "paid_at", "emv_payload", "updated_at"},
+    "payment_accounts": {
+        "external_account_id",
+        "status",
+        "secret_ref",
+        "webhook_secret_hash",
+        "updated_at",
+    },
+    "pix_charges": {
+        "status",
+        "end_to_end_id",
+        "paid_at",
+        "received_amount_cents",
+        "divergence_reason",
+        "emv_payload",
+        "updated_at",
+    },
     "webhook_events": {"processed_at", "processing_error", "attempts"},
     "audit_logs": set(),
     "monthly_closings": {"reopened_by_user_id", "reopen_reason", "report_ref"},
 }
 
+# Columns the application role cannot even READ: only the narrow function of ADR-016 will (TASK-006).
+UNREADABLE: dict[str, set[str]] = {"payment_accounts": {"webhook_secret_hash"}}
+
 # The only functions the application role may call besides the two context functions.
 CALLABLE_FUNCTIONS = {
     "statement_entries",
     "statement_summary",
+    "org_statement_summary",
     "statement_pending",
     "closing_entries_hash",
+    "closing_breakdown",
     "verify_closing",
 }
 
@@ -179,8 +256,11 @@ def test_the_expectations_cover_exactly_the_financial_tables() -> None:
 
 
 @pytest.mark.parametrize("table", TABLES)
-def test_select_is_granted_on_every_column(admin_engine: Engine, table: str) -> None:
-    assert _effective(admin_engine, table, "SELECT") == set(_columns(admin_engine, table))
+def test_select_is_granted_on_every_column_but_the_unreadable_ones(
+    admin_engine: Engine, table: str
+) -> None:
+    expected = set(_columns(admin_engine, table)) - UNREADABLE.get(table, set())
+    assert _effective(admin_engine, table, "SELECT") == expected
 
 
 @pytest.mark.parametrize("table", TABLES)
@@ -215,7 +295,8 @@ def test_no_other_privilege_on_a_financial_table(admin_engine: Engine, table: st
             )
         }
     assert others == set()
-    assert table_level == {"SELECT"}
+    # A table with an unreadable column has column-level SELECT only (no table-level one).
+    assert table_level == (set() if table in UNREADABLE else {"SELECT"})
 
 
 def test_no_column_with_a_server_assigned_value_is_insertable(admin_engine: Engine) -> None:

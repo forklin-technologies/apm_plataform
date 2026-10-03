@@ -140,6 +140,10 @@ UNIQUE_QUERY = text(
 
 # The one unique index the application can feed that does NOT carry the school, and why.
 GLOBAL_UNIQUE_ALLOWED = {
+    "uq_payment_accounts_webhook_secret_hash": (
+        "the SHA-256 of a 128-bit webhook secret: a clash reveals nothing, and resolve_webhook_target "
+        "(ADR-016) must look the account up without knowing its tenant"
+    ),
     "uq_contributions_receipt_token_hash": (
         "the hash of a 128-bit secret: a clash reveals nothing, and resolve_receipt (ADR-016) must "
         "look a receipt up without knowing its tenant"
@@ -193,22 +197,25 @@ CASES: list[
     (
         "ft.parent_transaction_id",
         "INSERT INTO financial_transactions (organization_id, school_id, kind, direction, amount_cents, "
-        "status, created_by_user_id, parent_transaction_id, parent_kind) VALUES (:org, :school, "
-        "'REFUND', 'OUT', 100, 'PENDING', :staff, :ref, 'CONTRIBUTION')",
-        lambda ledger: ledger.cash_contribution,
+        "status, category_id, origin_type, created_by_user_id, parent_transaction_id, parent_kind) "
+        "VALUES (:org, :school, 'REFUND', 'IN', 100, 'REQUESTED', :refund_category, 'TEACHER', :staff, "
+        ":ref, 'EXPENSE')",
+        lambda ledger: ledger.expense_paid,
         lambda ledger, tenants: ledger.school_b1_transaction,
     ),
     (
         "ft.category_id",
         "INSERT INTO financial_transactions (organization_id, school_id, kind, direction, amount_cents, "
-        "status, category_id) VALUES (:org, :school, 'CONTRIBUTION', 'IN', 100, 'PENDING_PAYMENT', :ref)",
+        "status, category_id, origin_type) "
+        "VALUES (:org, :school, 'CONTRIBUTION', 'IN', 100, 'PENDING_PAYMENT', :ref, 'GUARDIAN')",
         lambda ledger: ledger.category,
         lambda ledger, tenants: ledger.school_b1_category,
     ),
     (
         "ft.created_by_user_id",
         "INSERT INTO financial_transactions (organization_id, school_id, kind, direction, amount_cents, "
-        "status, created_by_user_id) VALUES (:org, :school, 'CONTRIBUTION', 'IN', 100, 'PENDING_PAYMENT', :ref)",
+        "status, category_id, origin_type, created_by_user_id) "
+        "VALUES (:org, :school, 'CONTRIBUTION', 'IN', 100, 'PENDING_PAYMENT', :category, 'GUARDIAN', :ref)",
         lambda ledger: ledger.fresh.staff,
         lambda ledger, tenants: tenants.user_b1,
     ),
@@ -256,27 +263,43 @@ CASES: list[
     ),
     (
         "expense_attachments.transaction_id",
-        "INSERT INTO expense_attachments (organization_id, school_id, transaction_id, storage_key, "
+        "INSERT INTO expense_attachments (organization_id, school_id, transaction_id, kind, storage_key, "
         "file_name, content_type, size_bytes, sha256, uploaded_by_user_id) "
-        "VALUES (:org, :school, :ref, 'k/x', 'a.pdf', 'application/pdf', 10, :hash, :staff)",
+        "VALUES (:org, :school, :ref, 'INVOICE', 'k/x', 'a.pdf', 'application/pdf', 10, :hash, :staff)",
         lambda ledger: ledger.expense_submitted,
         lambda ledger, tenants: ledger.school_b1_transaction,
     ),
     (
         "expense_attachments.uploaded_by_user_id",
-        "INSERT INTO expense_attachments (organization_id, school_id, transaction_id, storage_key, "
+        "INSERT INTO expense_attachments (organization_id, school_id, transaction_id, kind, storage_key, "
         "file_name, content_type, size_bytes, sha256, uploaded_by_user_id) "
-        "VALUES (:org, :school, :expense_submitted, 'k/x', 'a.pdf', 'application/pdf', 10, :hash, :ref)",
+        "VALUES (:org, :school, :expense_submitted, 'INVOICE', 'k/x', 'a.pdf', 'application/pdf', 10, :hash, :ref)",
         lambda ledger: ledger.fresh.staff,
         lambda ledger, tenants: tenants.user_b1,
     ),
     (
         "pix_charges.transaction_id",
-        "INSERT INTO pix_charges (organization_id, school_id, transaction_id, provider, txid, "
-        "amount_cents, expires_at) VALUES (:org, :school, :ref, 'SANDBOX', :txid, 3100, "
-        "now() + interval '30 minutes')",
+        "INSERT INTO pix_charges (organization_id, school_id, transaction_id, payment_account_id, "
+        "provider, txid, amount_cents, expires_at) VALUES (:org, :school, :ref, :account, 'SANDBOX', "
+        ":txid, 3100, now() + interval '30 minutes')",
         lambda ledger: ledger.pix_pending_2,
         lambda ledger, tenants: ledger.school_b1_transaction,
+    ),
+    (
+        "pix_charges.payment_account_id",
+        "INSERT INTO pix_charges (organization_id, school_id, transaction_id, payment_account_id, "
+        "provider, txid, amount_cents, expires_at) VALUES (:org, :school, :pix_pending_2, :ref, "
+        "'SANDBOX', :txid, 3100, now() + interval '30 minutes')",
+        lambda ledger: ledger.payment_account,
+        lambda ledger, tenants: ledger.school_b1_account,
+    ),
+    (
+        "ft.origin_user_id",
+        "INSERT INTO financial_transactions (organization_id, school_id, kind, direction, amount_cents, "
+        "status, category_id, origin_type, origin_user_id) "
+        "VALUES (:org, :school, 'CONTRIBUTION', 'IN', 100, 'PENDING_PAYMENT', :category, 'GUARDIAN', :ref)",
+        lambda ledger: ledger.fresh.staff,
+        lambda ledger, tenants: tenants.user_b1,
     ),
     (
         "monthly_closings.closed_by_user_id",
@@ -289,14 +312,16 @@ CASES: list[
     (
         "ft.school_id",
         "INSERT INTO financial_transactions (organization_id, school_id, kind, direction, amount_cents, "
-        "status) VALUES (:org, :ref, 'CONTRIBUTION', 'IN', 100, 'PENDING_PAYMENT')",
+        "status, category_id, origin_type) "
+        "VALUES (:org, :ref, 'CONTRIBUTION', 'IN', 100, 'PENDING_PAYMENT', :category, 'GUARDIAN')",
         lambda ledger: ledger.fresh.school,
         lambda ledger, tenants: tenants.school_b1,
     ),
     (
         "ft.organization_id",
         "INSERT INTO financial_transactions (organization_id, school_id, kind, direction, amount_cents, "
-        "status) VALUES (:ref, :school, 'CONTRIBUTION', 'IN', 100, 'PENDING_PAYMENT')",
+        "status, category_id, origin_type) "
+        "VALUES (:ref, :school, 'CONTRIBUTION', 'IN', 100, 'PENDING_PAYMENT', :category, 'GUARDIAN')",
         lambda ledger: ledger.fresh.org,
         lambda ledger, tenants: tenants.org_b,
     ),
@@ -312,6 +337,10 @@ def _parameters(ledger: Ledger, tenants: Tenants, ref: uuid.UUID) -> dict[str, A
         "hash": token_hash(),
         "txid": uuid.uuid4().hex,
         "closing": ledger.closing,
+        "category": ledger.fresh.cat_in,
+        "refund_category": ledger.fresh.cat_refund,
+        "account": ledger.payment_account,
+        "pix_pending_2": ledger.pix_pending_2,
         "bare_expense": ledger.bare_expense,
         "bare_reimbursement": ledger.bare_reimbursement,
         "expense_submitted": ledger.expense_submitted,
