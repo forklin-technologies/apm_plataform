@@ -377,6 +377,7 @@ def add_expense(
     occurred_at: datetime | None = None,
     approved_amount: int | None = None,
     attach: bool = True,
+    description: str = "Material",
 ) -> uuid.UUID:
     """An expense submitted by `staff` and decided by `treasurer` (never the same person).
 
@@ -399,7 +400,7 @@ def add_expense(
         text(
             "INSERT INTO expenses (transaction_id, organization_id, school_id, description, "
             "purchase_reason, payment_method, paid_by, submitted_by_user_id) "
-            "VALUES (:tx, :org, :school, 'Material', 'school project', 'CARD', :paid_by, :staff)"
+            "VALUES (:tx, :org, :school, :description, 'school project', 'CARD', :paid_by, :staff)"
         ),
         {
             "tx": tx,
@@ -407,6 +408,7 @@ def add_expense(
             "school": fresh.school,
             "paid_by": paid_by,
             "staff": fresh.staff,
+            "description": description,
         },
     )
     if attach and start != "DRAFT":
@@ -449,6 +451,7 @@ def add_reimbursement(
     status: str = "PENDING",
     settled_at: datetime | None = None,
     reference: str | None = None,
+    occurred_at: datetime | None = None,
 ) -> uuid.UUID:
     """A reimbursement of an APPROVED collaborator expense, for the APPROVED amount (the default)."""
     if amount is None:
@@ -464,7 +467,7 @@ def add_reimbursement(
         amount=amount,
         status="PENDING",
         created_by=fresh.treasurer,
-        occurred_at=settled_at,
+        occurred_at=occurred_at or settled_at,
         parent=expense,
         parent_kind="EXPENSE",
         origin_user_id=fresh.staff,
@@ -497,6 +500,8 @@ def add_collaborator_expense(
     *,
     approved_amount: int | None = None,
     reimbursed_at: datetime | None = None,
+    occurred_at: datetime | None = None,
+    description: str = "Material",
 ) -> tuple[uuid.UUID, uuid.UUID]:
     """An expense paid by a collaborator, approved (maybe partially), and its reimbursement (PAID
     when reimbursed_at is given). The expense itself never moves the cash. Returns
@@ -508,9 +513,11 @@ def add_collaborator_expense(
         paid_by="COLLABORATOR",
         status="APPROVED",
         approved_amount=approved_amount,
+        occurred_at=occurred_at,
+        description=description,
     )
     if reimbursed_at is None:
-        return expense, add_reimbursement(conn, fresh, expense)
+        return expense, add_reimbursement(conn, fresh, expense, occurred_at=occurred_at)
     reimbursement = add_reimbursement(
         conn, fresh, expense, status="PAID", settled_at=reimbursed_at, reference="bank-ref-1"
     )
