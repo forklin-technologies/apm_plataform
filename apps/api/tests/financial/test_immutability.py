@@ -32,12 +32,14 @@ IMMUTABLE: dict[str, list[str]] = {
         "school_id",
         "kind",
         "direction",
-        "amount_cents",
         "parent_transaction_id",
         "parent_kind",
         "reference_code",
         "created_at",
         "created_by_user_id",
+        "origin_type",
+        "origin_name",
+        "origin_user_id",
     ],
     "contributions": [
         "transaction_id",
@@ -67,8 +69,17 @@ IMMUTABLE: dict[str, list[str]] = {
         "created_at",
     ],
     "refunds": ["transaction_id", "organization_id", "school_id", "kind", "reason", "created_at"],
-    "categories": ["id", "organization_id", "school_id", "key", "applies_to", "created_at"],
+    "categories": [
+        "id",
+        "organization_id",
+        "school_id",
+        "key",
+        "applies_to",
+        "report_group",
+        "created_at",
+    ],
     "school_settings": ["school_id", "organization_id", "created_at"],
+    "payment_accounts": ["id", "organization_id", "school_id", "provider", "created_at"],
     "pix_charges": [
         "id",
         "organization_id",
@@ -99,11 +110,19 @@ IMMUTABLE: dict[str, list[str]] = {
         "period_end",
         "timezone",
         "opening_balance_cents",
+        "contributions_in_cents",
+        "other_in_cents",
+        "refunds_in_cents",
         "total_in_cents",
+        "expenses_out_cents",
+        "reimbursements_out_cents",
         "total_out_cents",
         "closing_balance_cents",
+        "pending_reimbursements_cents",
+        "closing_after_pending_cents",
         "entries_count",
         "entries_hash",
+        "breakdown",
         "closed_by_user_id",
         "closed_at",
     ],
@@ -231,7 +250,7 @@ def _final_rows(ledger: Ledger) -> dict[str, uuid.UUID]:
         "settled APM expense": ledger.expense_paid,
         "cancelled contribution": ledger.cancelled_contribution,
         "rejected expense": ledger.rejected_expense,
-        "failed refund": ledger.failed_refund,
+        "rejected refund": ledger.rejected_refund,
     }
 
 
@@ -240,7 +259,7 @@ FINAL_ROW_NAMES = [
     "settled APM expense",
     "cancelled contribution",
     "rejected expense",
-    "failed refund",
+    "rejected refund",
 ]
 
 
@@ -271,11 +290,13 @@ def test_a_final_ledger_row_changes_in_no_column_at_all(
     assert "can never change" in error or "is final" in error, error
 
 
-@pytest.mark.parametrize("column", ["status", "settled_at", "updated_at"])
+@pytest.mark.parametrize(
+    "column", ["status", "settled_at", "updated_at", "amount_cents", "category_id", "occurred_at"]
+)
 def test_the_application_role_cannot_change_a_final_row_either(
     app_engine: Engine, admin_engine: Engine, tenants: Tenants, ledger: Ledger, column: str
 ) -> None:
-    """These three are the columns the application may update: the trigger is what stops it."""
+    """These are the columns the application may update: the trigger is what stops it."""
     expression = _new_value(_data_types(admin_engine, "financial_transactions")[column], column)
     for row in (ledger.cash_contribution, ledger.expense_paid, ledger.rejected_expense):
         error = _attempt(
@@ -310,6 +331,7 @@ def test_confirming_twice_is_safe_and_does_not_touch_the_row(
 # (table, subject row, column, value to write): a column that holds a value cannot be rewritten.
 SET_ONCE = [
     ("expenses", "expense_paid", "approved_by_user_id", "gen_random_uuid()"),
+    ("expenses", "expense_paid", "approved_amount_cents", "approved_amount_cents + 1"),
     ("expenses", "rejected_expense", "decision_reason", "'rewritten'"),
 ]
 
