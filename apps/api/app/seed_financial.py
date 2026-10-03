@@ -21,7 +21,7 @@ import uuid
 from collections.abc import Callable
 from typing import Any
 
-from sqlalchemy import Connection, text
+from sqlalchemy import Connection, TextClause, text
 
 # (key, name, applies to, report group). Keys are stable; names are what the school sees.
 DEFAULT_CATEGORIES: tuple[tuple[str, str, str, str], ...] = (
@@ -109,8 +109,8 @@ def seed_financial(connection: Connection, count: Count) -> None:
             count("financial_transactions", written)
 
 
-def _id(connection: Connection, sql: str, **params: Any) -> uuid.UUID:
-    found: Any = connection.execute(text(sql), params).scalar_one()
+def _id(connection: Connection, statement: TextClause, **params: Any) -> uuid.UUID:
+    found: Any = connection.execute(statement, params).scalar_one()
     return uuid.UUID(str(found))
 
 
@@ -121,7 +121,7 @@ def _demo_movements(
     category = {
         key: _id(
             connection,
-            "SELECT id FROM categories WHERE school_id = :s AND key = :k",
+            text("SELECT id FROM categories WHERE school_id = :s AND key = :k"),
             s=school,
             k=key,
         )
@@ -129,7 +129,7 @@ def _demo_movements(
     }
     account = _id(
         connection,
-        "SELECT id FROM payment_accounts WHERE school_id = :s AND status = 'ACTIVE'",
+        text("SELECT id FROM payment_accounts WHERE school_id = :s AND status = 'ACTIVE'"),
         s=school,
     )
     scope = {"o": org, "s": school}
@@ -140,14 +140,16 @@ def _demo_movements(
         written += 1
         return _id(
             connection,
-            "INSERT INTO financial_transactions (organization_id, school_id, kind, direction, "
-            "amount_cents, status, category_id, origin_type, origin_user_id, occurred_at, "
-            "settled_at, created_by_user_id, parent_transaction_id, parent_kind) "
-            "VALUES (:o, :s, :kind, :direction, :amount, :status, :category, :origin_type, "
-            ":origin_user, now() - make_interval(days => :days), "
-            "CASE WHEN :settled THEN now() - make_interval(days => :days) END, "
-            ":author, :parent, :parent_kind) "
-            "RETURNING id",
+            text(
+                "INSERT INTO financial_transactions (organization_id, school_id, kind, direction, "
+                "amount_cents, status, category_id, origin_type, origin_user_id, occurred_at, "
+                "settled_at, created_by_user_id, parent_transaction_id, parent_kind) "
+                "VALUES (:o, :s, :kind, :direction, :amount, :status, :category, :origin_type, "
+                ":origin_user, now() - make_interval(days => :days), "
+                "CASE WHEN :settled THEN now() - make_interval(days => :days) END, "
+                ":author, :parent, :parent_kind) "
+                "RETURNING id"
+            ),
             **{
                 **scope,
                 "origin_user": None,
@@ -219,10 +221,12 @@ def _demo_movements(
         )
         charge = _id(
             connection,
-            "INSERT INTO pix_charges (organization_id, school_id, transaction_id, payment_account_id, "
-            "provider, txid, amount_cents, expires_at) VALUES (:o, :s, :t, :a, 'SANDBOX', "
-            "replace(gen_random_uuid()::text, '-', ''), :amount, now() + interval '30 minutes') "
-            "RETURNING id",
+            text(
+                "INSERT INTO pix_charges (organization_id, school_id, transaction_id, "
+                "payment_account_id, provider, txid, amount_cents, expires_at) "
+                "VALUES (:o, :s, :t, :a, 'SANDBOX', replace(gen_random_uuid()::text, '-', ''), "
+                ":amount, now() + interval '30 minutes') RETURNING id"
+            ),
             **scope, t=tx, a=account, amount=amount,
         )  # fmt: skip
         if outcome == "pending":
