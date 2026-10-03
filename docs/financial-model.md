@@ -177,7 +177,7 @@ Foreign key checks run **without** row level security. A single-column foreign k
 
 **`payment_accounts.webhook_secret_hash`** is written but never read by `apm_app`: the table has a column list for `SELECT`, which leaves that column out (`has_column_privilege('apm_app', 'payment_accounts', 'webhook_secret_hash', 'SELECT')` is false, and the tests try to read it by many paths: a direct `SELECT`, `RETURNING`, a filter on it, the column statistics, the functions of the schema). The ORM model loads the column `deferred`, so a normal load asks only for the columns the role may read.
 
-Functions: `EXECUTE` goes only to `apm_app`, only for `statement_entries`, `statement_summary`, `org_statement_summary`, `statement_pending`, `closing_entries_hash`, `closing_breakdown` and `verify_closing` (plus the two context functions). Trigger functions need no `EXECUTE`. There is **no `SECURITY DEFINER` function** in this schema: every function is `SECURITY INVOKER` with `search_path = pg_catalog`, owned by `apm_owner`.
+Functions: `EXECUTE` goes only to `apm_app`, only for `statement_entries`, `statement_summary`, `org_statement_summary`, `statement_pending`, `closing_entries_hash`, `closing_breakdown` and `verify_closing` (plus the context functions of the tenancy core and of the authentication). Trigger functions need no `EXECUTE`. There is **no `SECURITY DEFINER` function in the financial schema**: every function of revision 0007 is `SECURITY INVOKER` with `search_path = pg_catalog`, owned by `apm_owner`. The only `SECURITY DEFINER` functions of the database are the three of ADR-016 (revision 0006, owned by `apm_definer`). No financial trigger is on `users`, `memberships` or `invitations`, so none fires inside `accept_invitation`; the only financial trigger on a tenancy table is `schools_10_settings` (AFTER INSERT on `schools`), which no definer function reaches. A trigger added on those tables later would run with the rights of `apm_definer` and its `search_path`.
 
 ## The reference code
 
@@ -244,7 +244,7 @@ Every `INSERT` and `UPDATE` of the ledger, the details, `pix_charges`, `payment_
 | `app.request_id` | the id of the request (at most 200 characters) |
 | `app.client_ip` | optional: the client address (an `inet`) |
 
-The trigger `audit_logs_05_actor` fills `actor_user_id`, `actor_type`, `request_id`, `ip` and `occurred_at` from them (and `audit_logs` has no `INSERT` privilege on those columns), `ck_audit_logs_actor_matches_type` requires `actor_type = 'USER'` exactly when there is a user, and `audit_logs_10_member` checks the actor. Without the settings the actor is NULL and `PUBLIC`. `app.user_id`, `app.request_id` and `app.actor_type` are defined by TASK-004 together with the session; `app.client_ip` is proposed here and optional.
+The trigger `audit_logs_05_actor` fills `actor_user_id`, `actor_type`, `request_id`, `ip` and `occurred_at` from them (and `audit_logs` has no `INSERT` privilege on those columns), `ck_audit_logs_actor_matches_type` requires `actor_type = 'USER'` exactly when there is a user, and `audit_logs_10_member` checks the actor. Without the settings the actor is NULL and `PUBLIC`. `app.user_id`, `app.request_id` and `app.actor_type` are set by `app/db/request_context.py` (TASK-004), local to the transaction: `USER` with a session, `PUBLIC` for the login and the acceptance of an invitation (no session), `SYSTEM` only when a job sets it explicitly; `app.client_ip` is proposed here and optional (not set today).
 
 ## Trigger inventory
 
