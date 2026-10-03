@@ -10,8 +10,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:$PATH"
 RUN groupadd --system --gid 10001 app \
  && useradd --system --uid 10001 --gid app --no-create-home --shell /usr/sbin/nologin app \
- && mkdir /app \
- && chown app:app /app
+ && mkdir /app /outbox \
+ && chown app:app /app /outbox \
+ && chmod 700 /outbox
 WORKDIR /app
 
 FROM base AS uv-base
@@ -38,7 +39,7 @@ COPY --from=deps-dev /opt/venv /opt/venv
 COPY --chown=app:app . .
 USER app
 EXPOSE 8000
-CMD ["uvicorn", "--factory", "app.main:create_app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "--factory", "app.main:create_app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
 
 FROM base AS runtime
 COPY --from=deps-prod /opt/venv /opt/venv
@@ -47,4 +48,4 @@ COPY --chown=app:app migrations ./migrations
 COPY --chown=app:app alembic.ini ./
 USER app
 EXPOSE 8000
-CMD ["uvicorn", "--factory", "app.main:create_app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "--factory", "app.main:create_app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]

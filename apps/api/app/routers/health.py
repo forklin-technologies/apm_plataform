@@ -7,13 +7,14 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from app.auth.deps import public
 from app.db.posture import cheap_posture_ok
 from app.db.session import get_db
 from app.schemas.health import HealthResponse, ReadinessResponse
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(tags=["health"])
+router = APIRouter(tags=["health"], dependencies=[Depends(public())])
 
 
 @router.get("/health", summary="Liveness")

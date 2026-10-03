@@ -11,6 +11,7 @@ x-api-build: &api-build
 # Only the one-shot and tool services get the admin URL.
 x-tool-env: &tool-env
   ENV: ${ENV:-development}
+  AUTH_SECRET: ${AUTH_SECRET:?copy .env.example to .env}
   DATABASE_URL: postgresql+psycopg://apm_app:${APP_DB_PASSWORD:?copy .env.example to .env}@db:5432/${POSTGRES_DB:?copy .env.example to .env}
   DATABASE_ADMIN_URL: postgresql+psycopg://${POSTGRES_USER:?copy .env.example to .env}:${POSTGRES_PASSWORD:?copy .env.example to .env}@db:5432/${POSTGRES_DB:?copy .env.example to .env}
 
@@ -47,6 +48,18 @@ services:
     environment:
       ENV: ${ENV:-development}
       DATABASE_URL: postgresql+psycopg://apm_app:${APP_DB_PASSWORD:?copy .env.example to .env}@db:5432/${POSTGRES_DB:?copy .env.example to .env}
+      AUTH_SECRET: ${AUTH_SECRET:?copy .env.example to .env}
+      # Development only: WebKit (Safari, the Maestri portal) does not accept a Secure cookie over
+      # plain http. The API refuses to start with ENV=production unless this is true.
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      PUBLIC_ORIGINS: ${PUBLIC_ORIGINS:-}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
+      OUTBOX_DIR: /outbox
+      # Which peers uvicorn believes about X-Forwarded-For: only the reverse proxy's address. With
+      # no proxy in front keep the default (nothing forwarded is trusted).
+      FORWARDED_ALLOW_IPS: ${TRUSTED_PROXY_IPS:-127.0.0.1}
+    volumes:
+      - outbox:/outbox
     ports:
       - "127.0.0.1:${API_HOST_PORT:-8001}:8000"
     depends_on:
@@ -103,3 +116,5 @@ services:
 
 volumes:
   db_data:
+  # Development e-mail outbox (invitation links, password notices), files with mode 0600.
+  outbox:

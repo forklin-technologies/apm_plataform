@@ -1,24 +1,30 @@
-from collections.abc import Iterator
+"""The tenant context and the tenant-bound database session for a route, from the session.
+
+`require_tenant_context` used to answer 401 always (there was no authentication). It returns the
+context of the ACTIVE membership of the logged-in user, revalidated on every request; the session it
+runs in was bound to that context by app.auth.deps.get_principal, so every transaction carries it.
+"""
+
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Depends
 from sqlalchemy.orm import Session
 
-from app.db.tenant import TenantContext, tenant_session
+from app.auth.deps import CurrentPrincipal, Db
+from app.core.errors import ProblemError
+from app.db.tenant import TenantContext
 
 
-def require_tenant_context() -> TenantContext:
-    """Where the tenant of a request will come from once authentication exists (TASK-004).
-
-    Until then there is no trustworthy way to know it, so this always answers 401. It deliberately
-    ignores headers, query and body: the tenant is never taken from what the client sends.
-    """
-    raise HTTPException(status_code=401, detail="Authentication is required")
+def require_tenant_context(principal: CurrentPrincipal) -> TenantContext:
+    if principal.tenant is None:
+        raise ProblemError(
+            409, "context_required", "Choose which school or organization to act for first"
+        )
+    return principal.tenant
 
 
 def get_tenant_db(
-    request: Request, context: Annotated[TenantContext, Depends(require_tenant_context)]
-) -> Iterator[Session]:
-    """Request-scoped session whose transactions carry the tenant context."""
-    with tenant_session(request.app.state.session_factory, context) as session:
-        yield session
+    _context: Annotated[TenantContext, Depends(require_tenant_context)], db: Db
+) -> Session:
+    """The request's session, already bound to the tenant context of the active membership."""
+    return db
