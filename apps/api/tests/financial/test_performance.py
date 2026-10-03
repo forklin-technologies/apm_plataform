@@ -67,20 +67,27 @@ def perf(migrated_scratch_db: ScratchDb) -> Iterator[PerfData]:
             text("SET LOCAL session_replication_role = replica")
         )  # bulk load: triggers off
         for school in schools:
-            category = uuid.uuid4()
-            conn.execute(
-                text(
-                    "INSERT INTO categories (id, organization_id, school_id, key, name, applies_to) VALUES (:c, :o, :s, 'perf_out', 'Out', 'OUT')"
-                ),
-                {"c": category, "o": org, "s": school},
-            )
-            params = {"o": org, "s": school, "c": category, "u": user}
+            category, category_in = uuid.uuid4(), uuid.uuid4()
+            for cid, key, applies_to, group in (
+                (category, "perf_out", "OUT", "EXPENSES_REIMBURSEMENTS"),
+                (category_in, "perf_in", "IN", "CONTRIBUTIONS"),
+            ):
+                conn.execute(
+                    text(
+                        "INSERT INTO categories (id, organization_id, school_id, key, name, "
+                        "applies_to, report_group) VALUES (:c, :o, :s, :k, :k, :a, :g)"
+                    ),
+                    {"c": cid, "o": org, "s": school, "k": key, "a": applies_to, "g": group},
+                )
+            params = {"o": org, "s": school, "c": category, "ci": category_in, "u": user}
             spread = "timestamptz '2024-01-01 12:00+00' + random() * 700 * interval '1 day'"
             conn.execute(
                 text(
                     "INSERT INTO financial_transactions (organization_id, school_id, kind, direction, "
-                    "amount_cents, status, occurred_at, settled_at, reference_code) "
-                    f"SELECT :o, :s, 'CONTRIBUTION', 'IN', 100 + g % 900, 'PAID', ts, ts, g "
+                    "amount_cents, status, category_id, origin_type, occurred_at, settled_at, "
+                    "reference_code) "
+                    "SELECT :o, :s, 'CONTRIBUTION', 'IN', 100 + g % 900, 'PAID', :ci, 'GUARDIAN', "
+                    f"ts, ts, g "
                     f"FROM (SELECT g, {spread} AS ts FROM generate_series(1, 3000) g) x"
                 ),
                 params,
@@ -91,8 +98,10 @@ def perf(migrated_scratch_db: ScratchDb) -> Iterator[PerfData]:
                     + spread
                     + " AS ts FROM generate_series(3001, 4500) g), "
                     "ins AS (INSERT INTO financial_transactions (id, organization_id, school_id, kind, direction, "
-                    "amount_cents, status, category_id, occurred_at, settled_at, created_by_user_id, reference_code) "
-                    "SELECT id, :o, :s, 'EXPENSE', 'OUT', 50 + g % 500, 'PAID', :c, ts, ts, :u, g FROM x RETURNING id) "
+                    "amount_cents, status, category_id, origin_type, occurred_at, settled_at, "
+                    "created_by_user_id, reference_code) "
+                    "SELECT id, :o, :s, 'EXPENSE', 'OUT', 50 + g % 500, 'PAID', :c, 'TEACHER', ts, ts, :u, g "
+                    "FROM x RETURNING id) "
                     "INSERT INTO expenses (transaction_id, organization_id, school_id, description, paid_by, "
                     "submitted_by_user_id) SELECT x.id, :o, :s, 'Material', "
                     "CASE WHEN x.g % 6 = 0 THEN 'COLLABORATOR' ELSE 'APM' END, :u FROM x"
@@ -102,9 +111,10 @@ def perf(migrated_scratch_db: ScratchDb) -> Iterator[PerfData]:
             conn.execute(
                 text(
                     "INSERT INTO financial_transactions (organization_id, school_id, kind, direction, "
-                    "amount_cents, status, occurred_at, settled_at, created_by_user_id, parent_transaction_id, "
-                    "parent_kind, reference_code) "
-                    f"SELECT :o, :s, 'REIMBURSEMENT', 'OUT', 70, 'PAID', ts, ts, :u, gen_random_uuid(), 'EXPENSE', g "
+                    "amount_cents, status, category_id, origin_type, occurred_at, settled_at, "
+                    "created_by_user_id, parent_transaction_id, parent_kind, reference_code) "
+                    "SELECT :o, :s, 'REIMBURSEMENT', 'OUT', 70, 'PAID', :c, 'TEACHER', ts, ts, :u, "
+                    f"gen_random_uuid(), 'EXPENSE', g "
                     f"FROM (SELECT g, {spread} AS ts FROM generate_series(4501, 4750) g) x"
                 ),
                 params,
@@ -112,16 +122,49 @@ def perf(migrated_scratch_db: ScratchDb) -> Iterator[PerfData]:
             conn.execute(
                 text(
                     "INSERT INTO financial_transactions (organization_id, school_id, kind, direction, "
-                    "amount_cents, status, occurred_at, settled_at, created_by_user_id, parent_transaction_id, "
-                    "parent_kind, reference_code) "
-                    f"SELECT :o, :s, 'REFUND', 'OUT', 30, 'PAID', ts, ts, :u, gen_random_uuid(), 'CONTRIBUTION', g "
+                    "amount_cents, status, category_id, origin_type, occurred_at, settled_at, "
+                    "created_by_user_id, parent_transaction_id, parent_kind, reference_code) "
+                    "SELECT :o, :s, 'REFUND', 'IN', 30, 'CONFIRMED', :ci, 'TEACHER', ts, ts, :u, "
+                    f"gen_random_uuid(), 'EXPENSE', g "
                     f"FROM (SELECT g, {spread} AS ts FROM generate_series(4751, 5000) g) x"
                 ),
                 params,
             )
+        # The detail rows the statement joins to (a real ledger has one per contribution, per
+        # reimbursement and per refund), so the planner sees tables of a realistic size.
+        for table, kind in (
+            ("contributions", "CONTRIBUTION"),
+            ("reimbursements", "REIMBURSEMENT"),
+            ("refunds", "REFUND"),
+        ):
+            extra = {
+                "contributions": ", method",
+                "reimbursements": ", beneficiary_user_id",
+                "refunds": ", reason",
+            }[table]
+            values = {
+                "contributions": ", 'CASH'",
+                "reimbursements": ", :u",
+                "refunds": ", 'devolucao'",
+            }[table]
+            conn.execute(
+                text(
+                    f"INSERT INTO {table} (transaction_id, organization_id, school_id{extra}) "
+                    f"SELECT id, organization_id, school_id{values} FROM financial_transactions "
+                    "WHERE organization_id = :o AND kind = :k"
+                ),
+                {"o": org, "k": kind, "u": user},
+            )
     with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-        conn.exec_driver_sql("ANALYZE financial_transactions")
-        conn.exec_driver_sql("ANALYZE expenses")
+        for table in (
+            "financial_transactions",
+            "expenses",
+            "contributions",
+            "reimbursements",
+            "refunds",
+            "categories",
+        ):
+            conn.exec_driver_sql(f"ANALYZE {table}")
     yield PerfData(engine, org, schools, user)
     engine.dispose()
 
@@ -148,6 +191,8 @@ def assert_indexed(plans: str) -> None:
     assert "plan:" in plans, "no plan was captured: auto_explain did not report"
     assert "Seq Scan on financial_transactions" not in plans, plans
     assert "Seq Scan on expenses" not in plans, plans
+    for detail in ("contributions", "reimbursements", "refunds"):
+        assert f"Seq Scan on {detail}" not in plans, plans
     assert (
         "ix_financial_transactions_school_settled" in plans
         or "ix_financial_transactions_school_status" in plans
@@ -227,8 +272,9 @@ def test_the_reference_code_lookup_and_the_booking_use_indexes(perf: PerfData) -
         transaction = conn.begin()
         plans, elapsed = explain_nested(
             conn,
-            "INSERT INTO financial_transactions (organization_id, school_id, kind, direction, amount_cents, status) "
-            "VALUES (:o, :s, 'CONTRIBUTION', 'IN', 100, 'PENDING_PAYMENT')",
+            "INSERT INTO financial_transactions (organization_id, school_id, kind, direction, amount_cents, "
+            "status, category_id, origin_type) VALUES (:o, :s, 'CONTRIBUTION', 'IN', 100, "
+            "'PENDING_PAYMENT', (SELECT id FROM categories WHERE school_id = :s AND key = 'perf_in'), 'GUARDIAN')",
             {"o": perf.org, "s": perf.schools[2]},
         )
         transaction.rollback()
