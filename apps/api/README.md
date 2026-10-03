@@ -86,6 +86,9 @@ On the host the settings are read from the real environment first, then from `ap
 | Preview the SQL (no database touched) | `docker compose run --rm tools alembic upgrade head --sql` | `uv run alembic upgrade head --sql` |
 | New revision (written, then fixed and formatted by `ruff` through the `alembic.ini` post-write hooks) | `docker compose run --rm --user "$(id -u):$(id -g)" -v "$PWD/apps/api:/app" tools alembic revision -m "message"` | `uv run alembic revision -m "message"` |
 
+> **A database that already applied the *earlier* revision `0005`** (the one before it also revoked `TEMPORARY` on the database) keeps the old privileges, because Alembic does not re-run an applied revision. Re-apply it once:
+> `docker compose run --rm tools alembic downgrade 0004_tenancy_rls && docker compose run --rm tools alembic upgrade head` (host: `uv run alembic downgrade 0004_tenancy_rls && uv run alembic upgrade head`). `python -m app.posture` (below) reports `temporary_allowed` until you do.
+
 Migrations run as the admin (`DATABASE_ADMIN_URL`) and do their DDL as the non-superuser `apm_owner` role. The password of `apm_app` is set by an online-only step as a SCRAM verifier: it never appears in `--sql`, in logs or in an error.
 
 (The "new revision" Docker variant mounts the source so the generated file lands on your disk.)

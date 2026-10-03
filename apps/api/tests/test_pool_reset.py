@@ -13,10 +13,12 @@ from typing import Any
 import pytest
 from sqlalchemy import Engine, create_engine, text
 from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.orm import sessionmaker
 
 from app.core.config import AdminSettings, Settings
-from app.db.session import build_engine
-from tests.dbsupport import transaction
+from app.db.session import build_engine, discard_session_state
+from app.db.tenant import TenantContext, tenant_session
+from tests.dbsupport import Tenants, transaction
 
 
 @pytest.fixture
@@ -190,3 +192,124 @@ def test_application_role_has_no_temporary_privilege(
     with transaction(app_engine) as connection, pytest.raises(ProgrammingError) as error:
         connection.execute(text("CREATE TEMP TABLE planted (i int)"))
     assert "permission denied" in str(error.value.orig)
+
+
+# --- P4: no automatic prepared statements ------------------------------------------------------
+
+
+def test_the_same_query_past_the_prepare_threshold_keeps_working_between_checkouts(
+    hooked_engine: Engine,
+) -> None:
+    """psycopg prepares a statement after 5 executions of the same query, and DISCARD ALL then
+    deallocates it behind the driver's back: the next execution would name a prepared statement
+    that no longer exists. `prepare_threshold=None` keeps that from ever happening. Run the SAME
+    parameterised query well past the default threshold, every time on a new checkout of the one
+    pooled connection."""
+    pids: set[Any] = set()
+    for value in range(15):
+        with hooked_engine.connect() as connection:
+            result: Any = connection.exec_driver_sql("SELECT %s::int + 1", (value,)).scalar_one()
+            assert result == value + 1
+            pids.add(connection.execute(text("SELECT pg_backend_pid()")).scalar_one())
+
+    assert len(pids) == 1, "the test needs the very same backend connection every time"
+
+
+def test_a_deallocate_the_driver_cannot_see_does_not_break_the_next_execution(
+    hooked_engine: Engine,
+) -> None:
+    """psycopg clears its prepared-statement cache when IT runs DISCARD ALL or DEALLOCATE ALL, but
+    not when a statement does it behind its back (here a DO block, which anyone with SQL access
+    can run). With automatic preparation on, the next execution of an already prepared query would
+    then name a statement that no longer exists and fail: one session could break the connection
+    for the next user. `prepare_threshold=None` removes the cache the driver would trust."""
+    with hooked_engine.connect() as connection:
+        for value in range(8):  # past the default threshold of 5: it WOULD be prepared
+            assert (
+                connection.exec_driver_sql("SELECT %s::int + 1", (value,)).scalar_one() == value + 1
+            )
+        connection.exec_driver_sql("DO $$ BEGIN EXECUTE 'DEALLOCATE ALL'; END $$")
+        assert connection.exec_driver_sql("SELECT %s::int + 1", (41,)).scalar_one() == 42
+
+
+# --- P5: the hook gives the connection back in the mode the next user expects --------------------
+
+
+def test_the_second_checkout_applies_the_tenant_context(
+    admin_settings: AdminSettings, tenants: Tenants
+) -> None:
+    """The hook turns autocommit ON to run DISCARD ALL and must turn it back OFF. If it did not,
+    the tenant setting (transaction-local) would last one statement and every later query would see
+    no tenant at all."""
+    settings = Settings(
+        _env_file=None,  # type: ignore[call-arg]
+        env="test",
+        database_url=admin_settings.database_url.get_secret_value(),  # type: ignore[arg-type]
+    )
+    engine = build_engine(settings, pool_size=1, max_overflow=0)
+    try:
+        with engine.connect() as connection:  # first use: its check-in runs the hook
+            connection.execute(text("SELECT 1"))
+        factory = sessionmaker(engine)
+        with tenant_session(factory, TenantContext(tenants.org_a)) as session:
+            raw = session.connection().connection.driver_connection
+            assert raw is not None and raw.autocommit is False
+            count: Any = session.execute(
+                text("SELECT count(*) FROM schools WHERE id = ANY(:ids)"),
+                {"ids": [tenants.school_a1, tenants.school_a2, tenants.school_b1]},
+            ).scalar_one()
+            assert count == 2
+            # And the context is still there for a SECOND statement of the same transaction.
+            organization: Any = session.execute(
+                text("SELECT current_setting('app.organization_id', true)")
+            ).scalar_one()
+            assert organization == str(tenants.org_a)
+    finally:
+        engine.dispose()
+
+
+# --- P3: a connection that cannot be cleaned is thrown away -------------------------------------
+
+
+class _Record:
+    def __init__(self) -> None:
+        self.invalidated = False
+
+    def invalidate(self, *args: Any, **kwargs: Any) -> None:
+        self.invalidated = True
+
+
+class _ConnectionThatCannotDiscard:
+    def __init__(self) -> None:
+        self.autocommit = False
+        self.statements: list[str] = []
+
+    def execute(self, statement: str) -> None:
+        self.statements.append(statement)
+        raise RuntimeError("DISCARD ALL failed")
+
+
+def test_a_connection_whose_discard_fails_is_invalidated_and_never_reused() -> None:
+    record = _Record()
+    connection = _ConnectionThatCannotDiscard()
+
+    discard_session_state(connection, record)  # must not raise
+
+    assert connection.statements == ["DISCARD ALL"]
+    assert record.invalidated is True
+    assert connection.autocommit is False  # restored even though the statement failed
+
+
+def test_a_clean_discard_does_not_invalidate_the_connection() -> None:
+    class Healthy(_ConnectionThatCannotDiscard):
+        def execute(self, statement: str) -> None:
+            self.statements.append(statement)
+
+    record = _Record()
+    connection = Healthy()
+
+    discard_session_state(connection, record)
+
+    assert connection.statements == ["DISCARD ALL"]
+    assert record.invalidated is False
+    assert connection.autocommit is False

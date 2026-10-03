@@ -16,6 +16,28 @@ from app.core.config import APP_DB_ROLE
 
 TENANT_TABLES = ("organizations", "schools", "users", "memberships")
 
+# Who owns the tenant tables.
+EXPECTED_TABLE_OWNER = "apm_owner"
+
+# Every policy that may exist, as (table, policy, command, roles). Closed on purpose: a missing one
+# opens a door, an extra one (a permissive policy someone added) opens another. Extend it in the
+# same migration that adds a policy (docs/tenancy.md, "How to create a new tenant table").
+EXPECTED_POLICIES: frozenset[tuple[str, str, str, str]] = frozenset(
+    {
+        ("organizations", "organizations_select", "SELECT", "public"),
+        ("organizations", "organizations_insert", "INSERT", "public"),
+        ("organizations", "organizations_update", "UPDATE", "public"),
+        ("schools", "schools_select", "SELECT", "public"),
+        ("schools", "schools_insert", "INSERT", "public"),
+        ("schools", "schools_update", "UPDATE", "public"),
+        ("memberships", "memberships_select", "SELECT", "public"),
+        ("memberships", "memberships_insert", "INSERT", "public"),
+        ("memberships", "memberships_update", "UPDATE", "public"),
+        ("memberships", "memberships_delete", "DELETE", "public"),
+        ("users", "users_select", "SELECT", "public"),
+    }
+)
+
 # The SECURITY DEFINER functions that may exist, as `schema.name(argument types)`. The list is
 # closed on purpose and empty until TASK-004 adds the approved ones (ADR-016).
 ALLOWED_SECURITY_DEFINER: frozenset[str] = frozenset()
@@ -34,6 +56,19 @@ _DEFINERS_QUERY = text(
     "|| '(' || pg_get_function_identity_arguments(p.oid) || ')' "
     "FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
     "WHERE p.prosecdef AND n.nspname NOT IN ('pg_catalog', 'information_schema')"
+)
+_MEMBERSHIPS_QUERY = text(
+    "SELECT r.rolname FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.roleid "
+    "WHERE m.member = (SELECT oid FROM pg_roles WHERE rolname = current_user) ORDER BY 1"
+)
+_OWNERS_QUERY = text(
+    "SELECT c.relname, pg_get_userbyid(c.relowner) FROM pg_class c "
+    "JOIN pg_namespace n ON n.oid = c.relnamespace "
+    "WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname = ANY(:tables)"
+)
+_POLICIES_QUERY = text(
+    "SELECT tablename, policyname, cmd, array_to_string(roles, ','), permissive "
+    "FROM pg_policies WHERE schemaname = 'public'"
 )
 _TEMPORARY_QUERY = text(
     "SELECT has_database_privilege(current_user, current_database(), 'TEMPORARY')"
@@ -83,6 +118,25 @@ def check_posture(connection: Connection) -> list[str]:
             findings.append(f"rls_not_enabled:{table}")
         if not forced:
             findings.append(f"rls_not_forced:{table}")
+
+    # The application role must be a member of NO role: not the owner (it could SET ROLE to it) and
+    # not a predefined one such as pg_read_all_data (it would read around the policies).
+    for (member_of,) in connection.execute(_MEMBERSHIPS_QUERY):
+        findings.append(f"role_membership:{member_of}")
+
+    for table, owner in connection.execute(_OWNERS_QUERY, {"tables": list(TENANT_TABLES)}):
+        if owner != EXPECTED_TABLE_OWNER:
+            findings.append(f"table_owner_unexpected:{table}")
+
+    found_policies: set[tuple[str, str, str, str]] = set()
+    for table, policy, command, roles, permissive in connection.execute(_POLICIES_QUERY):
+        found_policies.add((table, policy, command, roles))
+        if permissive != "PERMISSIVE":
+            findings.append(f"policy_not_permissive:{table}.{policy}")
+    for table, policy, _command, _roles in sorted(EXPECTED_POLICIES - found_policies):
+        findings.append(f"policy_missing:{table}.{policy}")
+    for table, policy, _command, _roles in sorted(found_policies - EXPECTED_POLICIES):
+        findings.append(f"policy_unexpected:{table}.{policy}")
 
     for identity in sorted({r[0] for r in connection.execute(_DEFINERS_QUERY)}):
         if identity not in ALLOWED_SECURITY_DEFINER:

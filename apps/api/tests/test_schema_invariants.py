@@ -227,21 +227,31 @@ def test_a_school_needs_an_existing_organization(admin_engine: Engine) -> None:
     assert _constraint(error.value) == "fk_schools_organization_id_organizations"
 
 
-@pytest.mark.parametrize(
-    ("sql", "constraint"),
-    [
-        ("DELETE FROM users WHERE id = :user_a1", "fk_memberships_user_id_users"),
-        (
-            "DELETE FROM schools WHERE id = :school_a1",
-            "fk_memberships_school_id_organization_id_schools",
-        ),
-        ("DELETE FROM organizations WHERE id = :org_a", "fk_schools_organization_id_organizations"),
-    ],
-)
+# Which foreign key may refuse the delete. Deleting an organization is referenced by schools AND by
+# memberships: PostgreSQL fires the referential triggers in a name-dependent order, so the test must
+# not assume which one reports first. It asserts the set of legitimate refusals instead.
+REFERENCED_DELETES = [
+    ("DELETE FROM users WHERE id = :user_a1", {"fk_memberships_user_id_users"}),
+    (
+        "DELETE FROM schools WHERE id = :school_a1",
+        {"fk_memberships_school_id_organization_id_schools"},
+    ),
+    (
+        "DELETE FROM organizations WHERE id = :org_a",
+        {
+            "fk_schools_organization_id_organizations",
+            "fk_memberships_organization_id_organizations",
+        },
+    ),
+]
+
+
+@pytest.mark.parametrize(("sql", "allowed"), REFERENCED_DELETES)
 def test_deleting_something_that_is_referenced_is_refused(
-    admin_engine: Engine, tenants: Tenants, sql: str, constraint: str
+    admin_engine: Engine, tenants: Tenants, sql: str, allowed: set[str]
 ) -> None:
     params = {"user_a1": tenants.user_a1, "school_a1": tenants.school_a1, "org_a": tenants.org_a}
     with transaction(admin_engine) as connection, pytest.raises(IntegrityError) as error:
         connection.execute(text(sql), params)
-    assert _constraint(error.value).startswith(constraint.split("_id_")[0])
+    assert _constraint(error.value) in allowed
+    assert "violates foreign key constraint" in str(error.value.orig)

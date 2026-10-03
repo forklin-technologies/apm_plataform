@@ -13,13 +13,13 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, create_engine, text
 
 from app.core.config import AdminSettings, Settings
 from app.db import posture
 from app.db.posture import PostureError, assert_posture, cheap_posture_ok, check_posture
 from app.main import create_app
-from tests.dbsupport import API_DIR
+from tests.dbsupport import API_DIR, ScratchDb, run_alembic
 from tests.helpers import make_settings
 
 UNREACHABLE = "postgresql+psycopg://apm_app:SECRETPW123@127.0.0.1:1/none"
@@ -100,6 +100,32 @@ def test_a_healthy_database_has_no_findings(app_engine: Engine) -> None:
             ["rls_not_enabled:users"],
         ),
         (
+            "member-of-a-predefined-role",
+            "GRANT pg_read_all_data TO apm_app",
+            "REVOKE pg_read_all_data FROM apm_app",
+            ["role_membership:pg_read_all_data"],
+        ),
+        (
+            "member-of-the-owner",
+            "GRANT apm_owner TO apm_app",
+            "REVOKE apm_owner FROM apm_app",
+            ["role_membership:apm_owner"],
+        ),
+        (
+            "policy-missing",
+            "DROP POLICY schools_select ON schools",
+            "CREATE POLICY schools_select ON schools FOR SELECT USING ("
+            "organization_id = (SELECT public.app_org()) AND "
+            "((SELECT public.app_school()) IS NULL OR id = (SELECT public.app_school())))",
+            ["policy_missing:schools.schools_select"],
+        ),
+        (
+            "policy-extra",
+            "CREATE POLICY posture_extra ON schools FOR SELECT USING (true)",
+            "DROP POLICY posture_extra ON schools",
+            ["policy_unexpected:schools.posture_extra"],
+        ),
+        (
             "definer",
             "CREATE FUNCTION public.posture_probe() RETURNS int LANGUAGE sql SECURITY DEFINER "
             "AS 'SELECT 1'",
@@ -119,6 +145,22 @@ def test_each_tampering_is_reported_with_a_fixed_code(
     with tampered(admin_engine, apply, restore):
         assert _findings(app_engine) == expected
     assert _findings(app_engine) == []  # and the restore really restored it
+
+
+def test_a_table_owned_by_the_wrong_role_is_reported(scratch_db: ScratchDb) -> None:
+    """Done on a scratch database, not the configured one: changing a table's owner moves (and
+    drops) the grants of the role it is handed to, and nothing can put them back by hand."""
+    assert run_alembic(scratch_db, "upgrade", "head").returncode == 0
+    admin = create_engine(scratch_db.admin_url)
+    app = create_engine(scratch_db.app_url)
+    try:
+        with admin.begin() as connection:
+            connection.execute(text("ALTER TABLE schools OWNER TO apm_app"))
+        with app.connect() as connection:
+            assert check_posture(connection) == ["table_owner_unexpected:schools"]
+    finally:
+        admin.dispose()
+        app.dispose()
 
 
 def test_temporary_privilege_is_reported(admin_engine: Engine, app_engine: Engine) -> None:
