@@ -338,7 +338,7 @@ class Expense(ScopeMixin, TimestampMixin, Base):
     approved_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_onupdate=FetchedValue()
     )
-    # The amount approved (and reimbursed): at most the requested; lower only if a collaborator paid.
+    # The amount approved (and reimbursed): at most the requested one (lower: collaborator only).
     approved_amount_cents: Mapped[int | None] = mapped_column(BigInteger)
     decision_reason: Mapped[str | None] = mapped_column(Text)
     correction_reason: Mapped[str | None] = mapped_column(Text)
