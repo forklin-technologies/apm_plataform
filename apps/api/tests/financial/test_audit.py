@@ -262,7 +262,7 @@ def test_every_audited_table_writes_its_record_and_none_carries_personal_data(
         {"t": cash},
     )
     # A Pix in review accepted by the management: the review reason, then the amount received.
-    _, charge = add_pix_contribution(conn, f, 3000)
+    pix_tx, charge = add_pix_contribution(conn, f, 3000)
     conn.execute(
         text("UPDATE pix_charges SET emv_payload = :e WHERE id = :c"),
         {"e": CANARIES["emv"], "c": charge},
@@ -406,13 +406,10 @@ def test_every_audited_table_writes_its_record_and_none_carries_personal_data(
     blob = json.dumps([[row[0], row[1]] for row in everything])
     for canary in CANARIES.values():
         assert canary not in blob, canary
-    receipt_hash: str = (
-        conn.execute(
-            text("SELECT receipt_token_hash FROM contributions WHERE transaction_id = :t"),
-            {"t": cash},
-        ).scalar_one()
-        or ""
-    )
+    receipt_hash: str = conn.execute(
+        text("SELECT receipt_token_hash FROM contributions WHERE transaction_id = :t"),
+        {"t": pix_tx},
+    ).scalar_one()
     for secret in (receipt_hash, webhook_hash):
         assert secret and secret not in blob  # the hash of a secret is never copied
     keys = {key for row in everything for image in row for key in (image or {})}
