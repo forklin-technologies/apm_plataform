@@ -93,7 +93,7 @@ def _create_support_tables() -> None:
             -- Where the category goes in the monthly report (section 12 of the product document).
             report_group text NOT NULL,
             -- false: an expense in this category needs no approver (the bank fees, which nobody
-            -- decides: the bank already took the money). It is born APPROVED and settled by whoever
+            -- decides: the bank already took the money). Only the category bank_fees may be false. It is born APPROVED and settled by whoever
             -- records it, audited like any other. Written once, with the category.
             requires_approval boolean NOT NULL DEFAULT true,
             is_active boolean NOT NULL DEFAULT true,
@@ -111,9 +111,11 @@ def _create_support_tables() -> None:
             CONSTRAINT ck_categories_group_matches_direction CHECK (
                 (applies_to = 'IN' AND report_group IN ('CONTRIBUTIONS', 'OTHER_INCOME', 'REFUNDS'))
                 OR (applies_to = 'OUT' AND report_group IN ('EXPENSES_REIMBURSEMENTS', 'BANK_FEES'))),
-            -- Only the bank fees may go without an approver.
+            -- Only the bank fees may go without an approver, and (key is unique per school) a
+            -- school has at most ONE such category: the one with the key bank_fees. The report
+            -- group BANK_FEES is for money OUT only (ck_categories_group_matches_direction).
             CONSTRAINT ck_categories_no_approval_only_for_bank_fees
-                CHECK (requires_approval OR report_group = 'BANK_FEES')
+                CHECK (requires_approval OR key = 'bank_fees')
         )
         """
     )

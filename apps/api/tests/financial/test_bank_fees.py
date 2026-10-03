@@ -352,6 +352,8 @@ def test_attachments_are_welcome_but_not_required(world: tuple[Connection, Fresh
     [
         ("OUT", "EXPENSES_REIMBURSEMENTS", False, "ck_categories_no_approval_only_for_bank_fees"),
         ("IN", "CONTRIBUTIONS", False, "ck_categories_no_approval_only_for_bank_fees"),
+        # the right group is not enough: only the category called bank_fees goes without approval
+        ("OUT", "BANK_FEES", False, "ck_categories_no_approval_only_for_bank_fees"),
         ("IN", "BANK_FEES", True, "ck_categories_group_matches_direction"),
         ("IN", "BANK_FEES", False, "ck_categories_group_matches_direction"),
     ],
@@ -368,6 +370,27 @@ def test_only_an_outgoing_bank_fees_category_can_go_without_approval(
             ),
             {"o": f.org, "s": f.school, "a": applies_to, "g": group, "r": approval},
         )
+
+
+@pytest.mark.parametrize("key", ["bank_fees_2", "bank_fee", "tarifas", "fees"])
+def test_the_only_category_without_approval_is_the_one_called_bank_fees(
+    world: tuple[Connection, Fresh], key: str
+) -> None:
+    """A school has ONE category without approval: another key is refused even in the right group,
+    and a second `bank_fees` is the unique key of the school."""
+    conn, f = world
+    bank_fees_category(conn, f)
+    insert = text(
+        "INSERT INTO categories (organization_id, school_id, key, name, applies_to, report_group, "
+        "requires_approval) VALUES (:o, :s, :k, 'X', 'OUT', 'BANK_FEES', false)"
+    )
+    with (
+        pytest.raises(IntegrityError, match="ck_categories_no_approval_only_for_bank_fees"),
+        conn.begin_nested(),
+    ):
+        conn.execute(insert, {"o": f.org, "s": f.school, "k": key})
+    with pytest.raises(IntegrityError, match="uq_categories_school_id_key"), conn.begin_nested():
+        conn.execute(insert, {"o": f.org, "s": f.school, "k": "bank_fees"})
 
 
 def test_a_category_that_needs_approval_is_the_default(world: tuple[Connection, Fresh]) -> None:
@@ -455,3 +478,31 @@ def test_the_application_role_records_and_settles_a_fee_under_row_level_security
                 "FROM expenses LIMIT 1"
             )
         )
+
+
+def test_the_application_role_cannot_make_another_category_go_without_approval(
+    app_engine: Engine, tenants: Tenants
+) -> None:
+    """Neither by insert (the CHECK) nor by update (the column is not granted), and the one
+    category that may go without approval is still allowed to it."""
+    school_context = TenantContext(tenants.org_a, tenants.school_a1)
+    insert = text(
+        "INSERT INTO categories (organization_id, school_id, key, name, applies_to, report_group, "
+        "requires_approval) VALUES (:o, :s, :k, 'Tarifas', 'OUT', 'BANK_FEES', :r) RETURNING id"
+    )
+    scope = {"o": tenants.org_a, "s": tenants.school_a1}
+    with (
+        transaction(app_engine, context=school_context) as conn,
+        pytest.raises(IntegrityError, match="ck_categories_no_approval_only_for_bank_fees"),
+    ):
+        conn.execute(insert, {**scope, "k": "other_fees", "r": False})
+
+    with transaction(app_engine, context=school_context) as conn:
+        allowed: Any = conn.execute(insert, {**scope, "k": "bank_fees", "r": False}).scalar_one()
+        normal: Any = conn.execute(insert, {**scope, "k": "other_fees", "r": True}).scalar_one()
+        for category, value in ((allowed, "true"), (normal, "false")):
+            with pytest.raises(DBAPIError, match="permission denied"), conn.begin_nested():
+                conn.execute(
+                    text(f"UPDATE categories SET requires_approval = {value} WHERE id = :c"),  # noqa: S608
+                    {"c": category},
+                )

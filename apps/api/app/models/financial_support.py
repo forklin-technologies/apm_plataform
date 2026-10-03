@@ -65,9 +65,9 @@ class Category(ScopeMixin, TimestampMixin, Base):
             "OR (applies_to = 'OUT' AND report_group IN ('EXPENSES_REIMBURSEMENTS', 'BANK_FEES'))",
             name="group_matches_direction",
         ),
-        # Only the bank fees may go without an approver.
+        # Only the bank fees may go without an approver: one category per school (key is unique).
         CheckConstraint(
-            "requires_approval OR report_group = 'BANK_FEES'", name="no_approval_only_for_bank_fees"
+            "requires_approval OR key = 'bank_fees'", name="no_approval_only_for_bank_fees"
         ),
         Index("ix_categories_school_id", "school_id"),
         Index("ix_categories_organization_id", "organization_id"),
