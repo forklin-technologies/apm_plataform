@@ -6,7 +6,7 @@ this module logs, formats or raises with a password or a hash in the message.
 
 import secrets
 
-from argon2 import PasswordHasher, Type
+from argon2 import PasswordHasher, Type, extract_parameters
 from argon2.exceptions import InvalidHashError, VerificationError
 
 MIN_LENGTH = 12
@@ -35,10 +35,22 @@ def verify_hash(stored_hash: str, password: str) -> bool:
 _DUMMY_HASH = hash_password(secrets.token_urlsafe(32))
 
 
+def _is_argon2_hash(value: str) -> bool:
+    try:
+        extract_parameters(value)
+    except InvalidHashError:
+        return False
+    return True
+
+
 def check_password(stored_hash: str | None, password: str) -> bool:
-    """True only for a stored hash that matches. ALWAYS performs exactly one verification."""
-    matched = verify_hash(stored_hash or _DUMMY_HASH, password)
-    return matched and stored_hash is not None
+    """True only for a stored hash that matches. ALWAYS performs exactly one verification, of a
+    hash Argon2 can parse: when there is none (no password set) or the stored value is not an
+    Argon2 hash (damaged, or from another scheme), the dummy hash is verified instead, so the work
+    done and the time taken are the same as for a wrong password."""
+    usable = stored_hash if stored_hash is not None and _is_argon2_hash(stored_hash) else None
+    matched = verify_hash(usable or _DUMMY_HASH, password)
+    return matched and usable is not None
 
 
 def needs_rehash(stored_hash: str) -> bool:
