@@ -2,6 +2,7 @@
 OpenAPI document: valid, with the problem schema, the permission of each route and no password."""
 
 import json
+import re
 from collections.abc import Callable
 from typing import Any
 
@@ -13,6 +14,7 @@ from openapi_spec_validator import validate
 from starlette.requests import Request
 from starlette.responses import PlainTextResponse
 
+from app.auth.csrf import SAFE_METHODS
 from app.auth.deps import authenticated, public, require
 from app.auth.permissions import (
     PUBLIC_FRAMEWORK_PATHS,
@@ -190,6 +192,66 @@ def test_every_route_that_is_not_public_answers_401_without_a_session(api: Api) 
             assert response.json()["code"] == "unauthenticated"
             checked += 1
     assert checked >= 4
+
+
+# The Origin check is global middleware, so it covers a route nobody thought of. The test derives
+# the routes from the walk instead of from a hand-written list, so a new one is covered by itself.
+FOREIGN_ORIGINS: list[dict[str, str]] = [
+    {},
+    {"Origin": "null"},
+    {"Origin": "https://evil.example"},
+]
+
+
+def state_changing_routes(app: FastAPI) -> list[tuple[str, str]]:
+    """(method, path) of every route that changes state, with path parameters filled in (the
+    Origin check answers before the path is matched, so any value will do)."""
+    return [
+        (method, re.sub(r"\{[^}]+\}", "x", context.path or ""))
+        for context in effective_routes(app)
+        if isinstance(context.original_route, APIRoute)
+        for method in sorted((context.methods or set()) - SAFE_METHODS)
+    ]
+
+
+def assert_origin_is_required(api: Api, routes: list[tuple[str, str]]) -> None:
+    for method, path in routes:
+        for headers in FOREIGN_ORIGINS:
+            response = api.client.request(method, path, json={}, headers=headers)
+            where = f"{method} {path} with {headers}"
+            assert response.status_code == 403, where
+            assert response.json()["code"] == "origin_not_allowed", where
+            assert "set-cookie" not in response.headers, where
+
+
+def test_every_route_that_changes_state_refuses_a_request_without_the_origin_of_the_site(
+    api: Api,
+) -> None:
+    routes = state_changing_routes(api.client.app)  # type: ignore[arg-type]
+
+    assert ("POST", "/api/v1/auth/login") in routes
+    assert ("POST", "/api/v1/invitations/accept") in routes
+    assert len(routes) >= 6
+    assert not any(method in SAFE_METHODS for method, _path in routes)
+    assert_origin_is_required(api, routes)
+
+
+def test_a_route_added_later_is_covered_without_anybody_listing_it(apis: ApiFactory) -> None:
+    def add(app: FastAPI) -> None:
+        app.add_api_route(
+            "/api/v1/later/{thing}",
+            lambda thing: {},
+            methods=["POST", "PUT", "PATCH", "DELETE"],
+            dependencies=[Depends(public())],
+        )
+
+    api = apis.make(configure=add)
+
+    routes = state_changing_routes(api.client.app)  # type: ignore[arg-type]
+
+    for method in ("POST", "PUT", "PATCH", "DELETE"):
+        assert (method, "/api/v1/later/x") in routes
+    assert_origin_is_required(api, routes)
 
 
 def test_the_public_routes_are_the_ones_listed_and_nothing_else_works_anonymously(
