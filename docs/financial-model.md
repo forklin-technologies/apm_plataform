@@ -364,7 +364,7 @@ Other functions: `statement_entries`, `statement_summary`, `org_statement_summar
 | `test_product_scenarios.py` | F13: the dashboard and the example statement of the product requirements, worked out by hand |
 | `test_triggers.py`, `test_audit.py` | the trigger inventory and the rules; the audit trigger |
 | `test_performance.py` | 100 thousand movements, plans read with `auto_explain` |
-| `test_direct_pix.py` | F14: a Pix paid straight to the key (no charge, born PAID or in review, decided with a reason and the same amount), never two contributions with a charge, even at the same moment |
+| `test_direct_pix.py` | F14: a Pix paid straight to the key (no charge, born PAID or in review, decided with a reason and the same amount), never two contributions with a charge, even at the same moment; as `apm_app` under row level security (own school works, another school is refused with the same error whether or not its id exists) |
 | `test_bank_fees.py` | F15: a fee is recorded APPROVED with no approver, settled by whoever records it, audited, in its own report group, and nothing else can use the exemption |
 | `test_reconciliation.py` | F16: the difference to the bank balance is computed, visible, does not stop the closing and stays outside the hash |
 | `test_models.py`, `test_seed_financial.py`, `test_docs.py` | the models match the database; the seed; this page matches the catalog |

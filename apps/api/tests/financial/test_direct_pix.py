@@ -25,6 +25,8 @@ from sqlalchemy import Connection, Engine, create_engine, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
 from app.core.config import AdminSettings
+from app.db.tenant import TenantContext
+from tests.dbsupport import Tenants, transaction
 from tests.financial.support import (
     Fresh,
     add_cash_contribution,
@@ -502,3 +504,110 @@ def test_a_direct_pix_and_a_charge_with_the_same_id_never_both_commit(
     assert len(winners) == 1, results
     assert len(losers) == 1, results
     assert getattr(losers[0].orig, "sqlstate", None) == "23505"
+
+
+# --- the application role, under row level security --------------------------------------------------------------------
+
+
+def _register_as_app(conn: Connection, tenants: Tenants, reference: str, status: str) -> uuid.UUID:
+    """What the service will do for a school (a staff member of A1 registers a direct Pix): a
+    category of its own, the ledger row, then the detail row with the end-to-end id."""
+    category: Any = conn.execute(
+        text(
+            "INSERT INTO categories (organization_id, school_id, key, name, applies_to, report_group) "
+            "VALUES (:o, :s, :k, 'Contribuição', 'IN', 'CONTRIBUTIONS') RETURNING id"
+        ),
+        {"o": tenants.org_a, "s": tenants.school_a1, "k": f"f14_{uuid.uuid4().hex[:8]}"},
+    ).scalar_one()
+    tx: Any = conn.execute(
+        text(
+            "INSERT INTO financial_transactions (organization_id, school_id, kind, direction, amount_cents, "
+            "status, category_id, origin_type, created_by_user_id, settled_at) "
+            "VALUES (:o, :s, 'CONTRIBUTION', 'IN', 3000, :st, :c, 'GUARDIAN', :u, "
+            "CASE WHEN :st = 'PAID' THEN now() END) RETURNING id"
+        ),
+        {
+            "o": tenants.org_a,
+            "s": tenants.school_a1,
+            "st": status,
+            "c": category,
+            "u": tenants.user_a1,
+        },
+    ).scalar_one()
+    conn.execute(
+        text(
+            "INSERT INTO contributions (transaction_id, organization_id, school_id, method, "
+            "external_reference, guardian_name) VALUES (:t, :o, :s, 'PIX_DIRECT', :r, 'Responsável Exemplo')"
+        ),
+        {"t": tx, "o": tenants.org_a, "s": tenants.school_a1, "r": reference},
+    )
+    return uuid.UUID(str(tx))
+
+
+def test_the_application_role_registers_and_confirms_a_direct_pix_in_its_own_school(
+    app_engine: Engine, tenants: Tenants
+) -> None:
+    """With only the columns it is granted: it registers the Pix in review, writes the reason, and
+    confirms it; it cannot touch the end-to-end id afterwards."""
+    context = TenantContext(tenants.org_a, tenants.school_a1)
+    with transaction(app_engine, context=context) as conn:
+        tx = _register_as_app(conn, tenants, end_to_end_id(), "REVIEW_REQUIRED")
+        write_reason(conn, tx)
+        conn.execute(
+            text(
+                "UPDATE financial_transactions SET status = 'PAID', settled_at = now() WHERE id = :t"
+            ),
+            {"t": tx},
+        )
+        conn.exec_driver_sql("SET CONSTRAINTS ALL IMMEDIATE")  # the consistency check, now
+
+        assert status_of(conn, tx) == "PAID"
+        with pytest.raises(DBAPIError, match="permission denied"), conn.begin_nested():
+            conn.execute(
+                text("UPDATE contributions SET external_reference = :r WHERE transaction_id = :t"),
+                {"r": end_to_end_id(), "t": tx},
+            )
+
+
+def test_the_application_role_can_register_a_direct_pix_born_paid(
+    app_engine: Engine, tenants: Tenants
+) -> None:
+    context = TenantContext(tenants.org_a, tenants.school_a1)
+    with transaction(app_engine, context=context) as conn:
+        tx = _register_as_app(conn, tenants, end_to_end_id(), "PAID")
+        conn.exec_driver_sql("SET CONSTRAINTS ALL IMMEDIATE")
+        assert status_of(conn, tx) == "PAID"
+
+
+def test_another_school_refuses_a_direct_pix_and_never_says_whether_its_id_exists(
+    app_engine: Engine, tenants: Tenants, pool: Engine, school: Fresh
+) -> None:
+    """A context of A1 writes into a school of another organization: the policy refuses it, with
+    the very same error whether or not that school already holds a direct Pix with this id (the
+    unique index and the trigger never get the chance to answer); and the same id in the own
+    school is no clash at all, since the reference is unique per school."""
+    reference = end_to_end_id()
+    with pool.begin() as conn:
+        other = add_direct_pix(conn, school, 3000, settled_at=WHEN, reference=reference)
+    context = TenantContext(tenants.org_a, tenants.school_a1)
+
+    def attempt(external_reference: str) -> str:
+        with transaction(app_engine, context=context) as conn:
+            try:
+                conn.execute(
+                    text(
+                        "INSERT INTO contributions (transaction_id, organization_id, school_id, method, "
+                        "external_reference) VALUES (:t, :o, :s, 'PIX_DIRECT', :r)"
+                    ),
+                    {"t": other, "o": school.org, "s": school.school, "r": external_reference},
+                )
+            except DBAPIError as error:
+                return str(error.orig)
+        return ""
+
+    known, unknown = attempt(reference), attempt(end_to_end_id())
+    assert "row-level security" in known
+    assert known == unknown
+
+    with transaction(app_engine, context=context) as conn:
+        _register_as_app(conn, tenants, reference, "PAID")  # the same id, in the own school
