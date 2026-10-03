@@ -35,6 +35,9 @@ def build_engine(settings: Settings, **engine_options: Any) -> Engine:
     engine = create_engine(
         settings.database_url.get_secret_value(),
         pool_pre_ping=True,
+        # A failing statement would otherwise print its parameters in the error: password hashes,
+        # tokens. They are hidden everywhere (logs, tracebacks, problem details).
+        hide_parameters=True,
         # No automatic server-side prepared statements: DISCARD ALL deallocates them behind the
         # driver's back, and the next execution would fail.
         connect_args={"connect_timeout": CONNECT_TIMEOUT_SECONDS, "prepare_threshold": None},

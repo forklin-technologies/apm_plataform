@@ -1,5 +1,6 @@
 from functools import lru_cache
 from typing import Literal, Self
+from urllib.parse import urlsplit
 
 from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -107,6 +108,99 @@ class AdminSettings(Settings):
         return self
 
 
+DEV_ORIGINS = (
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8001",
+    "http://127.0.0.1:8001",
+)
+MIN_AUTH_SECRET_LENGTH = 32
+
+
+def _normalise_origin(origin: str) -> str:
+    parts = urlsplit(origin.strip())
+    if parts.scheme not in ("http", "https") or not parts.netloc or parts.path not in ("", "/"):
+        raise ValueError(
+            "PUBLIC_ORIGINS must be a comma-separated list of origins (scheme://host[:port])"
+        )
+    if parts.query or parts.fragment or parts.username or parts.password:
+        raise ValueError(
+            "PUBLIC_ORIGINS must be a comma-separated list of origins (scheme://host[:port])"
+        )
+    return f"{parts.scheme}://{parts.netloc.lower()}"
+
+
+class ApiSettings(Settings):
+    """Settings of the API process: everything in `Settings` plus authentication.
+
+    The tools that only need the database (Alembic, the seed, the posture command) keep using
+    `Settings`/`AdminSettings` and do not need the authentication secret.
+    """
+
+    # HMAC key for the CSRF token and for the rate-limit keys (e-mail and IP are stored only as
+    # HMACs). Long and random; `openssl rand -hex 32`.
+    auth_secret: SecretStr
+    # Cookies: with True the names carry the `__Host-` prefix and the cookies are `Secure`. False
+    # exists only because WebKit does not accept a Secure cookie over plain http in development.
+    cookie_secure: bool = True
+    # The origins the site is served from, comma-separated. Required in production; in development
+    # it defaults to the local dev origins. Every state-changing request must come from one of them.
+    public_origins: str = ""
+    # Where the links in e-mails point (the web app).
+    public_base_url: str = "http://localhost:3000"
+    # The only sender implemented writes e-mails to files (development); production needs one.
+    email_sender: Literal["file"] = "file"
+    outbox_dir: str = "/outbox"
+
+    @field_validator("auth_secret")
+    @classmethod
+    def _validate_auth_secret(cls, value: SecretStr) -> SecretStr:
+        if len(value.get_secret_value()) < MIN_AUTH_SECRET_LENGTH:
+            raise ValueError(f"AUTH_SECRET must be at least {MIN_AUTH_SECRET_LENGTH} characters")
+        return value
+
+    @field_validator("public_origins")
+    @classmethod
+    def _validate_public_origins(cls, value: str) -> str:
+        for origin in (part for part in value.split(",") if part.strip()):
+            _normalise_origin(origin)
+        return value
+
+    @model_validator(mode="after")
+    def _production_rules(self) -> Self:
+        if not self.is_production:
+            return self
+        if not self.cookie_secure:
+            raise ValueError("COOKIE_SECURE must be true when ENV=production")
+        origins = self.allowed_origins
+        if not origins or any(not origin.startswith("https://") for origin in origins):
+            raise ValueError(
+                "PUBLIC_ORIGINS must list the https origins of the site when ENV=production"
+            )
+        if self.email_sender == "file":
+            raise ValueError(
+                "no e-mail sender is available for ENV=production yet: the API cannot start there"
+            )
+        return self
+
+    @property
+    def allowed_origins(self) -> tuple[str, ...]:
+        configured = tuple(
+            _normalise_origin(part) for part in self.public_origins.split(",") if part.strip()
+        )
+        if configured or self.is_production:
+            return configured
+        return DEV_ORIGINS
+
+    @property
+    def session_cookie_name(self) -> str:
+        return "__Host-apm_session" if self.cookie_secure else "apm_session"
+
+    @property
+    def csrf_cookie_name(self) -> str:
+        return "__Host-apm_csrf" if self.cookie_secure else "apm_csrf"
+
+
 @lru_cache
 def get_settings() -> Settings:
     return Settings()  # type: ignore[call-arg]
@@ -115,3 +209,8 @@ def get_settings() -> Settings:
 @lru_cache
 def get_admin_settings() -> AdminSettings:
     return AdminSettings()  # type: ignore[call-arg]
+
+
+@lru_cache
+def get_api_settings() -> ApiSettings:
+    return ApiSettings()  # type: ignore[call-arg]
