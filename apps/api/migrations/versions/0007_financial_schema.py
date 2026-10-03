@@ -77,7 +77,7 @@ IDENTIFICATION_FIELDS = (
     "ARRAY['guardian_name', 'contributor_email', 'contributor_phone', 'student_name', "
     "'class_name']::text[]"
 )
-ORIGIN_TYPES = "'GUARDIAN', 'TEACHER', 'DIRECTOR', 'EMPLOYEE', 'MANAGEMENT', 'APM', 'OTHER'"
+ORIGIN_TYPES = "'GUARDIAN', 'TEACHER', 'DIRECTOR', 'EMPLOYEE', 'MANAGEMENT', 'APM', 'BANK', 'OTHER'"
 
 
 def _create_support_tables() -> None:
@@ -92,6 +92,10 @@ def _create_support_tables() -> None:
             applies_to text NOT NULL,
             -- Where the category goes in the monthly report (section 12 of the product document).
             report_group text NOT NULL,
+            -- false: an expense in this category needs no approver (the bank fees, which nobody
+            -- decides: the bank already took the money). It is born APPROVED and settled by whoever
+            -- records it, audited like any other. Written once, with the category.
+            requires_approval boolean NOT NULL DEFAULT true,
             is_active boolean NOT NULL DEFAULT true,
             {TIMESTAMPS},
             CONSTRAINT pk_categories PRIMARY KEY (id),
@@ -106,7 +110,10 @@ def _create_support_tables() -> None:
             -- The only valid groups, per direction (a report_group CHECK of its own would be implied).
             CONSTRAINT ck_categories_group_matches_direction CHECK (
                 (applies_to = 'IN' AND report_group IN ('CONTRIBUTIONS', 'OTHER_INCOME', 'REFUNDS'))
-                OR (applies_to = 'OUT' AND report_group = 'EXPENSES_REIMBURSEMENTS'))
+                OR (applies_to = 'OUT' AND report_group IN ('EXPENSES_REIMBURSEMENTS', 'BANK_FEES'))),
+            -- Only the bank fees may go without an approver.
+            CONSTRAINT ck_categories_no_approval_only_for_bank_fees
+                CHECK (requires_approval OR report_group = 'BANK_FEES')
         )
         """
     )
@@ -981,9 +988,26 @@ $body$
 # A contribution may be born REVIEW_REQUIRED, but only a PIX_DIRECT one (a credit seen on the bank
 # statement and not yet confirmed by the management): the method lives in the detail row, which
 # does not exist yet, so contributions_20_insert makes that rule when the detail row arrives.
+# An expense in a category WITHOUT approval (the bank fees) is born APPROVED, from the bank, and in
+# no other state: there is no approver to wait for. An APPROVED start anywhere else is refused.
 FUNCTIONS["ft_check_initial"] = f"""
 CREATE FUNCTION public.ft_check_initial() RETURNS trigger {HEADER} AS $body$
+DECLARE
+    waived boolean;
 BEGIN
+    IF NEW.kind = 'EXPENSE' THEN
+        SELECT NOT c.requires_approval INTO waived
+        FROM public.categories c
+        WHERE c.id = NEW.category_id AND c.school_id = NEW.school_id
+          AND c.organization_id = NEW.organization_id;
+        IF coalesce(waived, false) THEN
+            IF NEW.status <> 'APPROVED' OR NEW.origin_type <> 'BANK' THEN
+                RAISE EXCEPTION 'an expense in a category without approval is born APPROVED and its origin is the bank'
+                    USING ERRCODE = 'check_violation';
+            END IF;
+            RETURN NEW;
+        END IF;
+    END IF;
     IF NOT (NEW.kind || ':' || NEW.status) = ANY (ARRAY[
         'CONTRIBUTION:PENDING_PAYMENT', 'CONTRIBUTION:PAID', 'CONTRIBUTION:REVIEW_REQUIRED',
         'EXPENSE:DRAFT', 'EXPENSE:SUBMITTED',
@@ -1157,6 +1181,7 @@ DECLARE
     v_expense public.expenses%ROWTYPE;
     v_reimbursement public.reimbursements%ROWTYPE;
     v_refund public.refunds%ROWTYPE;
+    waived boolean;
 BEGIN
     SELECT * INTO r FROM public.financial_transactions f WHERE f.id = NEW.id;
     IF NOT FOUND THEN
@@ -1201,18 +1226,33 @@ BEGIN
         IF NOT FOUND THEN
             RAISE EXCEPTION 'expense % has no expenses row', r.id USING ERRCODE = 'check_violation';
         END IF;
-        IF r.status IN ('SUBMITTED', 'CORRECTION_REQUESTED', 'APPROVED', 'REJECTED', 'PAID') THEN
-            IF NOT EXISTS (SELECT 1 FROM public.expense_attachments a WHERE a.transaction_id = r.id) THEN
-                RAISE EXCEPTION 'an expense sent for review needs at least one attachment'
+        SELECT EXISTS (
+            SELECT 1 FROM public.categories cat
+            WHERE cat.id = r.category_id AND cat.school_id = r.school_id AND NOT cat.requires_approval
+        ) INTO waived;
+        IF waived THEN
+            -- A bank fee: paid by the APM, from the bank, with no approver and no review (so no
+            -- attachment, reason or payment method are demanded), APPROVED or settled or cancelled.
+            IF v_expense.paid_by <> 'APM' OR r.origin_type <> 'BANK'
+               OR v_expense.approved_by_user_id IS NOT NULL
+               OR r.status NOT IN ('APPROVED', 'PAID', 'CANCELLED') THEN
+                RAISE EXCEPTION 'an expense without approval is paid by the APM, comes from the bank, has no approver and is never sent for review'
                     USING ERRCODE = 'check_violation';
             END IF;
-            IF v_expense.purchase_reason IS NULL OR v_expense.payment_method IS NULL THEN
-                RAISE EXCEPTION 'an expense sent for review records the reason of the purchase and how it was paid'
-                    USING ERRCODE = 'check_violation';
+        ELSE
+            IF r.status IN ('SUBMITTED', 'CORRECTION_REQUESTED', 'APPROVED', 'REJECTED', 'PAID') THEN
+                IF NOT EXISTS (SELECT 1 FROM public.expense_attachments a WHERE a.transaction_id = r.id) THEN
+                    RAISE EXCEPTION 'an expense sent for review needs at least one attachment'
+                        USING ERRCODE = 'check_violation';
+                END IF;
+                IF v_expense.purchase_reason IS NULL OR v_expense.payment_method IS NULL THEN
+                    RAISE EXCEPTION 'an expense sent for review records the reason of the purchase and how it was paid'
+                        USING ERRCODE = 'check_violation';
+                END IF;
             END IF;
-        END IF;
-        IF r.status IN ('APPROVED', 'REJECTED', 'PAID') AND v_expense.approved_by_user_id IS NULL THEN
-            RAISE EXCEPTION 'a decided expense records who decided' USING ERRCODE = 'check_violation';
+            IF r.status IN ('APPROVED', 'REJECTED', 'PAID') AND v_expense.approved_by_user_id IS NULL THEN
+                RAISE EXCEPTION 'a decided expense records who decided' USING ERRCODE = 'check_violation';
+            END IF;
         END IF;
         IF r.status IN ('APPROVED', 'PAID') AND (
             v_expense.approved_amount_cents IS NULL OR v_expense.approved_amount_cents > r.amount_cents
@@ -1271,6 +1311,32 @@ BEGIN
        AND (TG_OP = 'INSERT' OR OLD.approved_by_user_id IS NULL) THEN
         NEW.approved_at := clock_timestamp();
     END IF;
+    RETURN NEW;
+END
+$body$
+"""
+
+# An expense in a category without approval (the bank fees) has no approver: the database sets the
+# approved amount to the requested one (what the bank charged), and the row refuses a collaborator
+# as payer. The state it is born in is ft_check_initial's rule; consistency checks the whole at commit.
+FUNCTIONS["expenses_apply_approval_waiver"] = f"""
+CREATE FUNCTION public.expenses_apply_approval_waiver() RETURNS trigger {HEADER} AS $body$
+DECLARE
+    ledger record;
+BEGIN
+    SELECT f.amount_cents, NOT cat.requires_approval AS waived INTO ledger
+    FROM public.financial_transactions f
+    JOIN public.categories cat ON cat.id = f.category_id AND cat.school_id = f.school_id
+    WHERE f.id = NEW.transaction_id AND f.organization_id = NEW.organization_id
+      AND f.school_id = NEW.school_id;
+    IF NOT FOUND OR NOT ledger.waived THEN
+        RETURN NEW;  -- not found: the composite foreign key refuses it, uniformly
+    END IF;
+    IF NEW.paid_by <> 'APM' THEN
+        RAISE EXCEPTION 'an expense in a category without approval is paid by the APM'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    NEW.approved_amount_cents := ledger.amount_cents;
     RETURN NEW;
 END
 $body$
@@ -1897,6 +1963,7 @@ FUNCTION_ORDER = (
     "ft_settle",
     "ft_check_consistency",
     "expenses_set_decision_time",
+    "expenses_apply_approval_waiver",
     "expenses_edit_only_when_editable",
     "expense_attachments_check_state",
     "contributions_check_review",
@@ -2017,7 +2084,12 @@ AUDIT = {
         "id",
         "tx",
     ),
-    "categories": ("id,key,name,applies_to,report_group,is_active", "", "id", ""),
+    "categories": (
+        "id,key,name,applies_to,report_group,requires_approval,is_active",
+        "",
+        "id",
+        "",
+    ),
     "school_settings": (
         "school_id,timezone,min_contribution_cents,max_contribution_cents,"
         "suggested_amounts_cents,allow_custom_amount,pix_expiration_minutes,required_fields,"
@@ -2184,6 +2256,12 @@ def _create_triggers() -> None:
         ),
         _trigger(
             "expenses",
+            "expenses_12_waiver",
+            "BEFORE INSERT",
+            "expenses_apply_approval_waiver",
+        ),
+        _trigger(
+            "expenses",
             "expenses_15_decision_time",
             "BEFORE INSERT OR UPDATE",
             "expenses_set_decision_time",
@@ -2262,6 +2340,7 @@ def _create_triggers() -> None:
             "key",
             "applies_to",
             "report_group",
+            "requires_approval",
             "created_at",
         ),
         immutable("school_settings", "school_id", "organization_id", "created_at"),
@@ -2511,7 +2590,16 @@ GRANTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
         (),
     ),
     "categories": (
-        ("organization_id", "school_id", "key", "name", "applies_to", "report_group", "is_active"),
+        (
+            "organization_id",
+            "school_id",
+            "key",
+            "name",
+            "applies_to",
+            "report_group",
+            "requires_approval",
+            "is_active",
+        ),
         ("name", "is_active", "updated_at"),
     ),
     "school_settings": (

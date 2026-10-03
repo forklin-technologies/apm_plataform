@@ -484,6 +484,67 @@ def add_expense(
     return tx
 
 
+def bank_fees_category(conn: Connection, fresh: Fresh) -> uuid.UUID:
+    """The category of the bank fees of the school (OUT, group BANK_FEES, no approval), made on first use."""
+    found = conn.execute(
+        text("SELECT id FROM categories WHERE school_id = :s AND key = 'bank_fees'"),
+        {"s": fresh.school},
+    ).scalar_one_or_none()
+    if found is not None:
+        return found  # type: ignore[no-any-return]
+    return conn.execute(  # type: ignore[no-any-return]
+        text(
+            "INSERT INTO categories (organization_id, school_id, key, name, applies_to, report_group, "
+            "requires_approval) VALUES (:o, :s, 'bank_fees', 'Tarifas bancárias', 'OUT', 'BANK_FEES', false) "
+            "RETURNING id"
+        ),
+        {"o": fresh.org, "s": fresh.school},
+    ).scalar_one()
+
+
+def add_bank_fee(
+    conn: Connection,
+    fresh: Fresh,
+    amount: int,
+    *,
+    settled_at: datetime | None = None,
+    occurred_at: datetime | None = None,
+    description: str = "Tarifa Pix Enviado",
+) -> uuid.UUID:
+    """A bank fee, the way the treasury records it: an expense of the APM in the category without
+    approval, born APPROVED (no approver, no attachment) and, with settled_at, settled by whoever
+    recorded it. The database fills in the approved amount."""
+    tx = add_transaction(
+        conn,
+        fresh,
+        kind="EXPENSE",
+        direction="OUT",
+        amount=amount,
+        status="APPROVED",
+        category=bank_fees_category(conn, fresh),
+        created_by=fresh.treasurer,
+        occurred_at=occurred_at or settled_at,
+        origin_type="BANK",
+        origin_name="Banco",
+    )
+    conn.execute(
+        text(
+            "INSERT INTO expenses (transaction_id, organization_id, school_id, description, paid_by, "
+            "submitted_by_user_id) VALUES (:tx, :org, :school, :description, 'APM', :who)"
+        ),
+        {
+            "tx": tx,
+            "org": fresh.org,
+            "school": fresh.school,
+            "description": description,
+            "who": fresh.treasurer,
+        },
+    )
+    if settled_at is not None:
+        set_status(conn, tx, "PAID", settled_at)
+    return tx
+
+
 def add_reimbursement(
     conn: Connection,
     fresh: Fresh,
