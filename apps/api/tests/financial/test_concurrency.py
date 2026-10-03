@@ -159,8 +159,8 @@ def test_a_pix_charge_confirmed_twice_is_confirmed_once(pool: Engine, school: Fr
     def confirm(conn: Connection) -> int:
         return conn.execute(
             text(
-                "UPDATE pix_charges SET status = 'PAID', end_to_end_id = :e, paid_at = now() "
-                "WHERE id = :c AND status = 'PENDING'"
+                "UPDATE pix_charges SET status = 'PAID', end_to_end_id = :e, paid_at = now(), "
+                "received_amount_cents = amount_cents WHERE id = :c AND status = 'PENDING'"
             ),
             {"e": e2e, "c": charge},
         ).rowcount
@@ -321,21 +321,22 @@ def test_a_duplicated_webhook_leaves_one_row(pool: Engine, school: Fresh) -> Non
         )
 
 
-def test_two_refunds_that_do_not_both_fit_cannot_both_be_created(
+def test_two_returns_that_do_not_both_fit_cannot_both_be_created(
     pool: Engine, school: Fresh
 ) -> None:
+    """Devoluções of the same expense add up to at most what was paid."""
     with pool.begin() as conn:
-        contribution = add_cash_contribution(conn, school, 5000, utc(2025, 3, 5, 15))
+        expense = add_expense(conn, school, 5000, status="PAID", settled_at=utc(2025, 3, 5, 15))
 
-    def refund(conn: Connection) -> uuid.UUID:
-        return add_refund(conn, school, contribution, "CONTRIBUTION", 3000)
+    def give_back(conn: Connection) -> uuid.UUID:
+        return add_refund(conn, school, 3000, parent=expense, parent_kind="EXPENSE")
 
-    results = run_together(pool, [refund, refund], hold=0.2)
+    results = run_together(pool, [give_back, give_back], hold=0.2)
 
     created = [r for r in results if isinstance(r, uuid.UUID)]
     failed = [r for r in results if isinstance(r, Exception)]
     assert len(created) == 1 and len(failed) == 1
-    assert "refunds would exceed the original amount" in str(failed[0])
+    assert "returns would exceed the amount paid" in str(failed[0])
 
 
 def test_one_expense_gets_one_reimbursement_even_when_asked_twice_at_once(
