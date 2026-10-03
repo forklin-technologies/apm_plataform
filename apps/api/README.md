@@ -29,7 +29,7 @@ cp .env.example .env
 
 | Variable | Used by | Notes |
 | --- | --- | --- |
-| `ENV` | API, tools | `development`, `test` or `production`. **Required, no default.** In `production` the Swagger/ReDoc UIs are off and the seed refuses to run. |
+| `ENV` | API, tools | `development`, `test` or `production`. **Required, no default.** In `production` the Swagger/ReDoc UIs are off, the seed refuses to run, and the API **refuses to start** until a real e-mail sender exists (only the development file outbox is implemented; see docs/auth.md). |
 | `DATABASE_URL` | API, tools | **Required, no default.** Connects as the **`apm_app`** role (no superuser, no BYPASSRLS, not the table owner). Must start with `postgresql+psycopg://`. Compose builds it from `APP_DB_PASSWORD`; the line in `.env` is only for the host (uv) variant. |
 | `DATABASE_ADMIN_URL` | tools only | Admin credential, for Alembic, the seed and the tests. **Never given to the API process.** Compose builds it from `POSTGRES_*`. |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` | compose `db`, tools | The admin of the database. Required by compose. |
