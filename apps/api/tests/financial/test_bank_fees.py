@@ -16,6 +16,7 @@ checked here, in the database:
 
 import json
 import uuid
+from typing import Any
 
 import pytest
 from sqlalchemy import Connection, Engine, text
@@ -81,7 +82,7 @@ def test_a_fee_is_recorded_approved_without_an_approver_and_settled_by_whoever_r
     world: tuple[Connection, Fresh],
 ) -> None:
     conn, f = world
-    fee = record_fee(conn, f, 590)
+    fee: Any = record_fee(conn, f, 590)
 
     row = conn.execute(
         text(
@@ -122,7 +123,7 @@ def test_a_fee_moves_the_cash_and_has_a_report_group_of_its_own(
     ]
     assert {r.origin_type for r in fees} == {"BANK"}
 
-    breakdown = conn.execute(
+    breakdown: Any = conn.execute(
         text("SELECT closing_breakdown(:s, :a, :b)"), {"s": f.school, "a": DAY[0], "b": DAY[1]}
     ).scalar_one()
     assert breakdown["BANK_FEES"] == {
@@ -136,11 +137,11 @@ def test_a_fee_moves_the_cash_and_has_a_report_group_of_its_own(
 
 def test_a_fee_waiting_to_be_settled_is_payable_not_cash(world: tuple[Connection, Fresh]) -> None:
     conn, f = world
-    fee = record_fee(conn, f, 590)
+    fee: Any = record_fee(conn, f, 590)
     check_consistency(conn)
 
     assert summary_row(conn, f, *DAY).total_out_cents == 0
-    section = conn.execute(
+    section: Any = conn.execute(
         text("SELECT section FROM statement_pending(:s) WHERE transaction_id = :t"),
         {"s": f.school, "t": fee},
     ).scalar_one()
@@ -151,7 +152,7 @@ def test_a_fee_recorded_by_mistake_can_be_cancelled_before_it_is_settled(
     world: tuple[Connection, Fresh],
 ) -> None:
     conn, f = world
-    fee = record_fee(conn, f, 590)
+    fee: Any = record_fee(conn, f, 590)
     set_status(conn, fee, "CANCELLED")
     check_consistency(conn)
     assert summary_row(conn, f, *DAY).total_out_cents == 0
@@ -159,7 +160,7 @@ def test_a_fee_recorded_by_mistake_can_be_cancelled_before_it_is_settled(
 
 def test_the_bank_can_give_a_fee_back_as_a_refund(world: tuple[Connection, Fresh]) -> None:
     conn, f = world
-    fee = add_bank_fee(conn, f, 590, settled_at=WHEN)
+    fee: Any = add_bank_fee(conn, f, 590, settled_at=WHEN)
     add_refund(
         conn,
         f,
@@ -188,7 +189,7 @@ def test_a_fee_is_audited_with_its_actor_from_insert_to_settlement(
         ),
         {"u": str(f.treasurer)},
     )
-    fee = add_bank_fee(conn, f, 590, settled_at=WHEN)
+    fee: Any = add_bank_fee(conn, f, 590, settled_at=WHEN)
 
     rows = list(
         conn.execute(
@@ -220,8 +221,8 @@ def test_a_fee_is_audited_with_its_actor_from_insert_to_settlement(
 
 def test_the_category_without_approval_is_audited_too(world: tuple[Connection, Fresh]) -> None:
     conn, f = world
-    category = bank_fees_category(conn, f)
-    after = conn.execute(
+    category: Any = bank_fees_category(conn, f)
+    after: Any = conn.execute(
         text(
             "SELECT after_data FROM audit_logs WHERE entity_type = 'categories' AND entity_id = :c"
         ),
@@ -287,7 +288,7 @@ def test_a_fee_is_never_paid_by_a_collaborator(world: tuple[Connection, Fresh]) 
 
 def test_a_fee_never_has_an_approver(world: tuple[Connection, Fresh]) -> None:
     conn, f = world
-    fee = record_fee(conn, f)
+    fee: Any = record_fee(conn, f)
     conn.execute(
         text("UPDATE expenses SET approved_by_user_id = :u WHERE transaction_id = :t"),
         {"u": f.admin, "t": fee},
@@ -325,7 +326,7 @@ def test_a_settled_expense_cannot_be_moved_into_the_category_without_approval(
 
 def test_a_fee_cannot_be_edited_after_it_is_born(world: tuple[Connection, Fresh]) -> None:
     conn, f = world
-    fee = record_fee(conn, f, 590)
+    fee: Any = record_fee(conn, f, 590)
     with pytest.raises(DBAPIError, match="amount changes only while"), conn.begin_nested():
         conn.execute(
             text("UPDATE financial_transactions SET amount_cents = 1 WHERE id = :t"), {"t": fee}
@@ -338,7 +339,7 @@ def test_a_fee_cannot_be_edited_after_it_is_born(world: tuple[Connection, Fresh]
 
 def test_attachments_are_welcome_but_not_required(world: tuple[Connection, Fresh]) -> None:
     conn, f = world
-    fee = record_fee(conn, f, 590)
+    fee: Any = record_fee(conn, f, 590)
     add_attachment(conn, f, fee, "PAYMENT_PROOF")
     check_consistency(conn)
 
@@ -381,7 +382,7 @@ def test_a_category_that_needs_approval_is_the_default(world: tuple[Connection, 
 
 def test_requires_approval_never_changes(world: tuple[Connection, Fresh]) -> None:
     conn, f = world
-    category = bank_fees_category(conn, f)
+    category: Any = bank_fees_category(conn, f)
     with pytest.raises(DBAPIError, match="requires_approval can never change"), conn.begin_nested():
         conn.execute(
             text("UPDATE categories SET requires_approval = true WHERE id = :c"), {"c": category}
@@ -402,7 +403,7 @@ def test_the_application_role_records_and_settles_a_fee_under_row_level_security
     database, not the caller, fills in the approved amount."""
     school_context = TenantContext(tenants.org_a, tenants.school_a1)
     with transaction(app_engine, context=school_context) as conn:
-        category = conn.execute(
+        category: Any = conn.execute(
             text(
                 "INSERT INTO categories (organization_id, school_id, key, name, applies_to, report_group, "
                 "requires_approval) VALUES (:o, :s, 'bank_fees', 'Tarifas bancárias', 'OUT', 'BANK_FEES', false) "
@@ -413,7 +414,7 @@ def test_the_application_role_records_and_settles_a_fee_under_row_level_security
         conn.execute(
             text("SELECT set_config('app.user_id', :u, true)"), {"u": str(tenants.user_a1)}
         )
-        fee = conn.execute(
+        fee: Any = conn.execute(
             text(
                 "INSERT INTO financial_transactions (organization_id, school_id, kind, direction, amount_cents, "
                 "status, category_id, origin_type, created_by_user_id) "
@@ -436,7 +437,7 @@ def test_the_application_role_records_and_settles_a_fee_under_row_level_security
         )
         conn.exec_driver_sql("SET CONSTRAINTS ALL IMMEDIATE")
 
-        approved = conn.execute(
+        approved: Any = conn.execute(
             text("SELECT approved_amount_cents FROM expenses WHERE transaction_id = :t"), {"t": fee}
         ).scalar_one()
         assert approved == 590

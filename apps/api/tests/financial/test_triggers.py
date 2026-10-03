@@ -58,8 +58,10 @@ EXPECTED_TRIGGERS: dict[tuple[str, str], Trigger] = {
     ("contributions", "contributions_10_anonymize"): _t(B, {UPD}, "assert_anonymize_only"),
     ("contributions", "contributions_12_set_once"): _t(B, {UPD}, "assert_set_once_columns"),
     ("contributions", "contributions_15_review"): _t(B, {UPD}, "contributions_check_review"),
+    ("contributions", "contributions_20_insert"): _t(B, {INS}, "contributions_check_insert"),
     ("expenses", "expenses_05_immutable"): _t(B, {UPD}, "assert_immutable_columns"),
     ("expenses", "expenses_10_set_once"): _t(B, {UPD}, "assert_set_once_columns"),
+    ("expenses", "expenses_12_waiver"): _t(B, {INS}, "expenses_apply_approval_waiver"),
     ("expenses", "expenses_15_decision_time"): _t(B, {INS, UPD}, "expenses_set_decision_time"),
     ("expenses", "expenses_20_editable"): _t(B, {UPD}, "expenses_edit_only_when_editable"),
     ("expenses", "expenses_25_member"): _t(B, {INS, UPD}, "assert_active_member"),
@@ -84,6 +86,9 @@ EXPECTED_TRIGGERS: dict[tuple[str, str], Trigger] = {
     ("pix_charges", "pix_charges_06_freeze"): _t(B, {UPD}, "freeze_when_final"),
     ("pix_charges", "pix_charges_10_set_once"): _t(B, {UPD}, "assert_set_once_columns"),
     ("pix_charges", "pix_charges_20_contribution"): _t(B, {INS}, "pix_charges_check_contribution"),
+    ("pix_charges", "pix_charges_20_end_to_end_id"): _t(
+        B, {INS, UPD}, "pix_charges_check_end_to_end_id"
+    ),
     ("webhook_events", "webhook_events_05_immutable"): _t(B, {UPD}, "assert_immutable_columns"),
     ("webhook_events", "webhook_events_10_set_once"): _t(B, {UPD}, "assert_set_once_columns"),
     ("audit_logs", "audit_logs_05_actor"): _t(B, {INS}, "audit_logs_fill_actor"),
@@ -138,6 +143,19 @@ EXPECTED_ORDER: dict[tuple[str, str, str], list[str]] = {
         "contributions_12_set_once",
         "contributions_15_review",
     ],
+    ("contributions", B, INS): ["contributions_20_insert"],
+    ("expenses", B, INS): [
+        "expenses_12_waiver",
+        "expenses_15_decision_time",
+        "expenses_25_member",
+    ],
+    ("pix_charges", B, INS): ["pix_charges_20_contribution", "pix_charges_20_end_to_end_id"],
+    ("pix_charges", B, UPD): [
+        "pix_charges_05_immutable",
+        "pix_charges_06_freeze",
+        "pix_charges_10_set_once",
+        "pix_charges_20_end_to_end_id",
+    ],
     ("expenses", B, UPD): [
         "expenses_05_immutable",
         "expenses_10_set_once",
@@ -164,6 +182,7 @@ EXPECTED_FUNCTIONS = {
     "freeze_when_final", "ft_assign_reference_code", "ft_check_consistency",
     "ft_check_relations", "ft_settle", "monthly_closings_reopen", "monthly_closings_snapshot",
     "pix_charges_check_contribution", "school_settings_lock_timezone", "schools_create_settings",
+    "contributions_check_insert", "expenses_apply_approval_waiver", "pix_charges_check_end_to_end_id",
     "statement_entries", "statement_pending", "statement_summary", "verify_closing",
 }  # fmt: skip
 

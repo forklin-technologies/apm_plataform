@@ -14,6 +14,7 @@ Rules checked here:
 """
 
 import uuid
+from typing import Any
 
 import pytest
 from sqlalchemy import Connection, text
@@ -119,7 +120,7 @@ def test_the_story_of_a_missing_direct_pix(world: tuple[Connection, Fresh]) -> N
 
     assert _figures(conn, closing) == (9410, 12410, 3000)
     assert conn.execute(text("SELECT verify_closing(:c)"), {"c": closing}).scalar_one() is True
-    late = conn.execute(
+    late: Any = conn.execute(
         text(
             "SELECT late_adjustment FROM financial_transactions WHERE school_id = :s AND kind = 'CONTRIBUTION' "
             "AND amount_cents = 3000"
@@ -232,7 +233,7 @@ def test_the_reconciliation_is_outside_the_hash_and_outside_verify_closing(
     )
     reconciled = _close(conn, f, bank_balance=12410)
 
-    hashes = [
+    hashes: Any = [
         conn.execute(
             text("SELECT entries_hash FROM monthly_closings WHERE id = :c"), {"c": c}
         ).scalar_one()
@@ -252,7 +253,7 @@ def test_the_closing_is_audited_with_the_reported_balance_and_the_difference(
     _month(conn, f)
     closing = _close(conn, f, bank_balance=12410)
 
-    after = conn.execute(
+    after: Any = conn.execute(
         text(
             "SELECT after_data FROM audit_logs WHERE entity_type = 'monthly_closings' AND entity_id = :c"
         ),

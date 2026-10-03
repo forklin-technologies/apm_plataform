@@ -18,6 +18,7 @@ import json
 import threading
 import uuid
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from sqlalchemy import Connection, Engine, create_engine, text
@@ -104,7 +105,7 @@ def test_a_direct_pix_in_review_is_not_cash_until_the_management_accepts_it(
 
     assert status_of(conn, tx) == "REVIEW_REQUIRED"
     assert summary_row(conn, f, *DAY).total_in_cents == 0
-    section = conn.execute(
+    section: Any = conn.execute(
         text("SELECT section FROM statement_pending(:s) WHERE transaction_id = :t"),
         {"s": f.school, "t": tx},
     ).scalar_one()
@@ -420,7 +421,7 @@ def test_the_audit_log_says_the_reference_is_present_and_never_shows_it(
         conn, f, 3000, settled_at=WHEN, reference=reference, guardian="Maria Exemplo"
     )
 
-    after = conn.execute(
+    after: Any = conn.execute(
         text(
             "SELECT after_data FROM audit_logs WHERE entity_type = 'contributions' AND entity_id = :t"
         ),

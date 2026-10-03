@@ -8,8 +8,8 @@ Three things:
   * a demonstration payment account per school, WITHOUT any credential (secret_ref is only a
     reference to a secrets manager that does not exist in development);
   * demonstration movements for each demo school that has none yet: contributions in cash, by
-    transfer and by Pix (paid, pending and in review), expenses in every state, reimbursements, a
-    devolução. They are written the way the application will write them, so every trigger of the
+    transfer and by Pix (paid, pending and in review, and one paid straight to the key of the APM),
+    expenses in every state, a bank fee, reimbursements, a devolução. They are written the way the application will write them, so every trigger of the
     schema runs (state machines, reference codes, audit, consistency at commit), and the actor of
     the audit records is SYSTEM.
 
@@ -34,8 +34,12 @@ DEFAULT_CATEGORIES: tuple[tuple[str, str, str, str], ...] = (
     ("school_supplies", "Compra de material", "OUT", "EXPENSES_REIMBURSEMENTS"),
     ("services", "Serviços", "OUT", "EXPENSES_REIMBURSEMENTS"),
     ("other_authorized", "Outras despesas autorizadas", "OUT", "EXPENSES_REIMBURSEMENTS"),
+    ("bank_fees", "Tarifas bancárias", "OUT", "BANK_FEES"),
     ("refund", "Devolução", "IN", "REFUNDS"),
 )
+
+# The categories whose expenses need no approver (the bank fees: the bank already took the money).
+NO_APPROVAL_CATEGORIES = frozenset({"bank_fees"})
 
 # school slug -> (who enters cash and decides, who submits expenses). Two different people, both
 # active members whose membership covers the school (the schema checks it).
@@ -45,7 +49,7 @@ DEMO_PEOPLE = {
     "demo-central": ("fabio.admin@example.test", "gina.tesoureira@example.test"),
 }
 
-MOVEMENTS_PER_SCHOOL = 18
+MOVEMENTS_PER_SCHOOL = 20
 
 Count = Callable[[str, int], None]
 
@@ -69,7 +73,8 @@ def seed_financial(connection: Connection, count: Count) -> None:
             created += connection.execute(
                 text(
                     "INSERT INTO categories (organization_id, school_id, key, name, applies_to, "
-                    "report_group) VALUES (:o, :s, :k, :n, :a, :g) ON CONFLICT DO NOTHING"
+                    "report_group, requires_approval) VALUES (:o, :s, :k, :n, :a, :g, :r) "
+                    "ON CONFLICT DO NOTHING"
                 ),
                 {
                     "o": organization_id,
@@ -78,6 +83,7 @@ def seed_financial(connection: Connection, count: Count) -> None:
                     "n": name,
                     "a": applies_to,
                     "g": group,
+                    "r": key not in NO_APPROVAL_CATEGORIES,
                 },
             ).rowcount
         count("categories", created)
@@ -239,6 +245,38 @@ def _demo_movements(
         else:
             move(tx, "REVIEW_REQUIRED")
 
+    def contribution_pix_direct(amount: int, days: int, *, name: str) -> None:
+        """A Pix paid straight to the key of the APM, registered by the treasury (born PAID)."""
+        tx = transaction(
+            kind="CONTRIBUTION", direction="IN", amount=amount, status="PAID",
+            category=category["parent_contribution"], origin_type="GUARDIAN", days=days,
+            author=treasurer, settled=True,
+        )  # fmt: skip
+        connection.execute(
+            text(
+                "INSERT INTO contributions (transaction_id, organization_id, school_id, method, "
+                "external_reference, guardian_name) VALUES (:t, :o, :s, 'PIX_DIRECT', "
+                "'E' || substr(replace(gen_random_uuid()::text, '-', ''), 1, 31), :g)"
+            ),
+            {**scope, "t": tx, "g": name},
+        )
+
+    def bank_fee(amount: int, days: int, description: str) -> None:
+        """A fee of the bank: an expense of the APM with no approver, born APPROVED and settled by
+        whoever records it."""
+        tx = transaction(
+            kind="EXPENSE", direction="OUT", amount=amount, status="APPROVED",
+            category=category["bank_fees"], origin_type="BANK", days=days, author=treasurer,
+        )  # fmt: skip
+        connection.execute(
+            text(
+                "INSERT INTO expenses (transaction_id, organization_id, school_id, description, "
+                "paid_by, submitted_by_user_id) VALUES (:t, :o, :s, :d, 'APM', :u)"
+            ),
+            {**scope, "t": tx, "d": description, "u": treasurer},
+        )
+        settle(tx, "PAID", days)
+
     def expense(
         amount: int,
         days: int,
@@ -347,11 +385,13 @@ def _demo_movements(
     contribution_pix(3000, 8, outcome="paid")
     contribution_pix(1500, 0, outcome="pending")
     contribution_pix(4000, 2, outcome="review")
+    contribution_pix_direct(2000, 5, name="Responsável Demo 3")
     paid = expense(12000, 20, "PAID", key="services")
     expense(3500, 6, "SUBMITTED", key="other_authorized")
     expense(8000, 3, "APPROVED")
     expense(900, 1, "DRAFT")
     expense(1100, 4, "CORRECTION_REQUESTED")
+    bank_fee(590, 7, "Tarifa Pix Enviado (demonstração)")
     reimbursement(expense(4500, 15, "APPROVED", paid_by="COLLABORATOR"), 4500, 10, paid=False)
     partial = expense(3000, 22, "APPROVED", paid_by="COLLABORATOR", approved=2200)
     reimbursement(partial, 2200, 21, paid=True)

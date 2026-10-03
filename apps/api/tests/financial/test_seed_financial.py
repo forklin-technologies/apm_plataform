@@ -10,7 +10,7 @@ from app.seed import seed
 from app.seed_financial import DEFAULT_CATEGORIES
 from tests.dbsupport import ScratchDb, run_alembic, transaction
 
-MOVEMENTS_PER_SCHOOL = 18  # 7 contributions, 7 expenses, 2 reimbursements, 2 devoluções
+MOVEMENTS_PER_SCHOOL = 20  # 8 contributions, 8 expenses, 2 reimbursements, 2 devoluções
 
 
 def test_the_seed_writes_categories_and_demonstration_movements_and_repeats_cleanly(
@@ -42,6 +42,37 @@ def test_the_seed_writes_categories_and_demonstration_movements_and_repeats_clea
                 assert [tuple(r) for r in rows] == sorted(
                     DEFAULT_CATEGORIES
                 )  # keys in English, names in Portuguese
+                approvals: Any = dict(
+                    connection.execute(
+                        text(
+                            "SELECT c.key, c.requires_approval FROM categories c "
+                            "JOIN schools s ON s.id = c.school_id WHERE s.slug = :s"
+                        ),
+                        {"s": school},
+                    ).all()
+                )
+                assert [k for k, needs in approvals.items() if not needs] == ["bank_fees"]
+                methods = {
+                    r[0]
+                    for r in connection.execute(
+                        text(
+                            "SELECT DISTINCT c.method FROM contributions c "
+                            "JOIN schools s ON s.id = c.school_id WHERE s.slug = :s"
+                        ),
+                        {"s": school},
+                    )
+                }
+                assert methods == {"CASH", "TRANSFER", "PIX", "PIX_DIRECT"}
+                fee = connection.execute(
+                    text(
+                        "SELECT f.status, f.origin_type, e.approved_amount_cents, e.approved_by_user_id "
+                        "FROM financial_transactions f JOIN expenses e ON e.transaction_id = f.id "
+                        "JOIN categories c ON c.id = f.category_id JOIN schools s ON s.id = f.school_id "
+                        "WHERE s.slug = :s AND c.key = 'bank_fees'"
+                    ),
+                    {"s": school},
+                ).one()
+                assert tuple(fee) == ("PAID", "BANK", 590, None)  # settled with no approver
                 count: Any = connection.execute(
                     text(
                         "SELECT count(*) FROM financial_transactions f JOIN schools s ON s.id = f.school_id "

@@ -61,7 +61,9 @@ VALID_EDGES: dict[str, dict[str, set[str]]] = {
     },
 }
 INITIAL = {
-    "CONTRIBUTION": {"PENDING_PAYMENT", "PAID"},
+    # REVIEW_REQUIRED is a birth state of a direct Pix only: the ledger row alone passes, and the
+    # detail row refuses every other method (tests/financial/test_direct_pix.py).
+    "CONTRIBUTION": {"PENDING_PAYMENT", "PAID", "REVIEW_REQUIRED"},
     "EXPENSE": {"DRAFT", "SUBMITTED"},
     "REIMBURSEMENT": {"PENDING"},
     "REFUND": {"REQUESTED"},

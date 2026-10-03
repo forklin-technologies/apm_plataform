@@ -116,6 +116,25 @@ CASES: list[tuple[str, str, str, str]] = [
     # --- details ------------------------------------------------------------------------------------
     (CONTRIBUTIONS, "cash_tx", "kind = 'EXPENSE'", "ck_contributions_kind"),
     (CONTRIBUTIONS, "cash_tx", "method = 'CARD'", "ck_contributions_method_valid"),
+    # PIX_DIRECT and its end-to-end id go together (a CASH row with an id, a PIX_DIRECT row without)
+    (
+        CONTRIBUTIONS,
+        "cash_tx",
+        "external_reference = 'E' || repeat('a', 31)",
+        "ck_contributions_external_reference_iff_pix_direct",
+    ),
+    (
+        CONTRIBUTIONS,
+        "cash_tx",
+        "method = 'PIX_DIRECT'",
+        "ck_contributions_external_reference_iff_pix_direct",
+    ),
+    (
+        CONTRIBUTIONS,
+        "cash_tx",
+        "method = 'PIX_DIRECT', external_reference = 'not-an-end-to-end-id'",
+        "ck_contributions_external_reference_format",
+    ),
     (CONTRIBUTIONS, "cash_tx", "guardian_name = ''", "ck_contributions_guardian_name_length"),
     (
         CONTRIBUTIONS,
@@ -236,6 +255,12 @@ CASES: list[tuple[str, str, str, str]] = [
         "applies_to = 'OUT'",
         "ck_categories_group_matches_direction",
     ),  # an OUT category in an IN group
+    (
+        "categories",
+        "category",
+        "requires_approval = false",
+        "ck_categories_no_approval_only_for_bank_fees",
+    ),  # only the bank fees go without an approver
     (
         "school_settings",
         "settings",
@@ -497,6 +522,18 @@ CASES: list[tuple[str, str, str, str]] = [
         "closing",
         "entries_count = -1",
         "ck_monthly_closings_totals_non_negative",
+    ),
+    (
+        "monthly_closings",
+        "closing",
+        "bank_balance_reported_cents = 1000000000001",
+        "ck_monthly_closings_bank_balance_range",
+    ),
+    (
+        "monthly_closings",
+        "closing",
+        "bank_balance_reported_cents = -1000000000001",
+        "ck_monthly_closings_bank_balance_range",
     ),
 ]
 

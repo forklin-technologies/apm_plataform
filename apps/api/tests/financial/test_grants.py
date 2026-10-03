@@ -40,6 +40,7 @@ INSERTABLE: dict[str, set[str]] = {
         "organization_id",
         "school_id",
         "method",
+        "external_reference",
         "guardian_name",
         "student_name",
         "class_name",
@@ -80,6 +81,7 @@ INSERTABLE: dict[str, set[str]] = {
         "name",
         "applies_to",
         "report_group",
+        "requires_approval",
         "is_active",
     },
     "school_settings": {
@@ -137,7 +139,13 @@ INSERTABLE: dict[str, set[str]] = {
         "before_data",
         "after_data",
     },
-    "monthly_closings": {"organization_id", "school_id", "period_start", "closed_by_user_id"},
+    "monthly_closings": {
+        "organization_id",
+        "school_id",
+        "period_start",
+        "closed_by_user_id",
+        "bank_balance_reported_cents",
+    },
 }
 
 # Never id, organization_id, school_id, kind, direction or a parent (the M1 lesson). The amount, the

@@ -491,8 +491,8 @@ def bank_fees_category(conn: Connection, fresh: Fresh) -> uuid.UUID:
         {"s": fresh.school},
     ).scalar_one_or_none()
     if found is not None:
-        return found  # type: ignore[no-any-return]
-    return conn.execute(  # type: ignore[no-any-return]
+        return found
+    return conn.execute(
         text(
             "INSERT INTO categories (organization_id, school_id, key, name, applies_to, report_group, "
             "requires_approval) VALUES (:o, :s, 'bank_fees', 'Tarifas bancárias', 'OUT', 'BANK_FEES', false) "

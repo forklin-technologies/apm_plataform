@@ -8,6 +8,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     CheckConstraint,
+    Computed,
     Date,
     DateTime,
     FetchedValue,
@@ -61,8 +62,12 @@ class Category(ScopeMixin, TimestampMixin, Base):
         CheckConstraint("applies_to IN ('IN', 'OUT')", name="applies_to_valid"),
         CheckConstraint(
             "(applies_to = 'IN' AND report_group IN ('CONTRIBUTIONS', 'OTHER_INCOME', 'REFUNDS')) "
-            "OR (applies_to = 'OUT' AND report_group = 'EXPENSES_REIMBURSEMENTS')",
+            "OR (applies_to = 'OUT' AND report_group IN ('EXPENSES_REIMBURSEMENTS', 'BANK_FEES'))",
             name="group_matches_direction",
+        ),
+        # Only the bank fees may go without an approver.
+        CheckConstraint(
+            "requires_approval OR report_group = 'BANK_FEES'", name="no_approval_only_for_bank_fees"
         ),
         Index("ix_categories_school_id", "school_id"),
         Index("ix_categories_organization_id", "organization_id"),
@@ -74,6 +79,9 @@ class Category(ScopeMixin, TimestampMixin, Base):
     applies_to: Mapped[str] = mapped_column(Text)
     # Where the category goes in the monthly report.
     report_group: Mapped[str] = mapped_column(Text)
+    # false: an expense in this category needs no approver (bank fees): it is born APPROVED and
+    # settled by whoever records it, audited like any other. Written once, with the category.
+    requires_approval: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
 
 
@@ -479,6 +487,11 @@ class MonthlyClosing(ScopeMixin, Base):
         CheckConstraint(f"entries_hash ~ '{HEX64}'", name="entries_hash_format"),
         CheckConstraint("jsonb_typeof(breakdown) = 'object'", name="breakdown_object"),
         CheckConstraint(
+            "bank_balance_reported_cents IS NULL "
+            "OR bank_balance_reported_cents BETWEEN -1000000000000 AND 1000000000000",
+            name="bank_balance_range",
+        ),
+        CheckConstraint(
             "report_ref IS NULL OR length(report_ref) BETWEEN 1 AND 500", name="report_ref_length"
         ),
         CheckConstraint(
@@ -527,6 +540,14 @@ class MonthlyClosing(ScopeMixin, Base):
     entries_hash: Mapped[str] = mapped_column(Text, server_default=FetchedValue())
     # {report_group: {in, out, count, categories: {key: {in, out, count}}}}
     breakdown: Mapped[dict[str, Any]] = mapped_column(JSONB, server_default=FetchedValue())
+    # Reconciliation: the final balance according to the bank, given when the month is closed (and
+    # never changed), and the difference to the cash balance of the platform, computed by the
+    # database (positive: the bank holds more). Neither is part of the hash or of verify_closing.
+    bank_balance_reported_cents: Mapped[int | None] = mapped_column(BigInteger)
+    bank_difference_cents: Mapped[int | None] = mapped_column(
+        BigInteger,
+        Computed("bank_balance_reported_cents - closing_balance_cents", persisted=True),
+    )
     closed_by_user_id: Mapped[uuid.UUID] = mapped_column(Uuid)
     closed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     report_ref: Mapped[str | None] = mapped_column(Text)

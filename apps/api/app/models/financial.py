@@ -36,7 +36,16 @@ from app.models.financial_common import (
 from app.models.mixins import TimestampMixin
 
 DIRECTIONS = ("IN", "OUT")
-ORIGIN_TYPES = ("GUARDIAN", "TEACHER", "DIRECTOR", "EMPLOYEE", "MANAGEMENT", "APM", "OTHER")
+ORIGIN_TYPES = (
+    "GUARDIAN",
+    "TEACHER",
+    "DIRECTOR",
+    "EMPLOYEE",
+    "MANAGEMENT",
+    "APM",
+    "BANK",
+    "OTHER",
+)
 CONTRIBUTION_STATUSES = ("PENDING_PAYMENT", "PAID", "EXPIRED", "CANCELLED", "REVIEW_REQUIRED")
 EXPENSE_STATUSES = (
     "DRAFT",
@@ -57,7 +66,7 @@ STATUSES_BY_KIND = {
 }
 # A row in one of these never changes again (a contribution in review is not final).
 FINAL_STATUSES = ("PAID", "EXPIRED", "CANCELLED", "REJECTED", "CONFIRMED")
-CONTRIBUTION_METHODS = ("PIX", "CASH", "TRANSFER", "OTHER")
+CONTRIBUTION_METHODS = ("PIX", "PIX_DIRECT", "CASH", "TRANSFER", "OTHER")
 PAYMENT_METHODS = ("PIX", "CARD", "CASH", "OTHER")
 ATTACHMENT_KINDS = ("INVOICE", "PAYMENT_PROOF", "OTHER")
 
@@ -217,8 +226,20 @@ class Contribution(ScopeMixin, TimestampMixin, Base):
         *scope_constraints("contributions"),
         detail_fk("contributions"),
         UniqueConstraint("receipt_token_hash", name="uq_contributions_receipt_token_hash"),
+        # Per school, never global: a global UNIQUE would answer for other tenants (the M1 class).
+        UniqueConstraint(
+            "school_id", "external_reference", name="uq_contributions_school_id_external_reference"
+        ),
         CheckConstraint("kind = 'CONTRIBUTION'", name="kind"),
         CheckConstraint(in_list("method", CONTRIBUTION_METHODS), name="method_valid"),
+        CheckConstraint(
+            "external_reference IS NULL OR external_reference ~ '^E[A-Za-z0-9]{31}$'",
+            name="external_reference_format",
+        ),
+        CheckConstraint(
+            "(method = 'PIX_DIRECT') = (external_reference IS NOT NULL)",
+            name="external_reference_iff_pix_direct",
+        ),
         CheckConstraint(
             "guardian_name IS NULL OR length(btrim(guardian_name)) BETWEEN 1 AND 120",
             name="guardian_name_length",
@@ -261,8 +282,12 @@ class Contribution(ScopeMixin, TimestampMixin, Base):
     organization_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     school_id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True)
     kind: Mapped[str] = mapped_column(Text, server_default=text("'CONTRIBUTION'"))
-    # PIX through the provider; CASH, TRANSFER and OTHER are manual entries of the treasury.
+    # PIX through the provider's charge; PIX_DIRECT is a Pix paid straight to the key of the APM
+    # (registered or reconciled by the management); CASH, TRANSFER and OTHER are manual entries.
     method: Mapped[str] = mapped_column(Text)
+    # The end-to-end id of a PIX_DIRECT Pix (and only of it): the same Pix is never two
+    # contributions, and it is kept distinct from the end_to_end_id of every charge of the school.
+    external_reference: Mapped[str | None] = mapped_column(Text)
     # Personal data of a child's family: only when the school enables it, never public. They can
     # only be erased (non-null to null), never rewritten (trigger contributions_10_anonymize).
     guardian_name: Mapped[str | None] = mapped_column(Text)
