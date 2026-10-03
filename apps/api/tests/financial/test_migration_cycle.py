@@ -30,8 +30,8 @@ BASE: str = _module().down_revision
 HEAD_LABEL = "0007_financial_schema (head)"
 FINANCIAL = {
     "audit_logs", "categories", "contributions", "expense_attachments", "expenses",
-    "financial_transactions", "monthly_closings", "pix_charges", "refunds", "reimbursements",
-    "school_settings", "webhook_events",
+    "financial_transactions", "monthly_closings", "payment_accounts", "pix_charges", "refunds",
+    "reimbursements", "school_settings", "webhook_events",
 }  # fmt: skip
 
 
@@ -111,7 +111,9 @@ def _write_financial_data(database: ScratchDb) -> None:
 def test_the_migration_cycles_in_a_database_with_data(scratch_db: ScratchDb) -> None:
     assert run_alembic(scratch_db, "upgrade", BASE).returncode == 0
     before = _state(scratch_db)
-    assert before["financial_tables"] == set() and before["functions"] == 2
+    # 7 functions at BASE: the 2 of the tenancy core, the 2 more context functions of the
+    # authentication (app_session_id, app_user_id) and its 3 SECURITY DEFINER functions (0006)
+    assert before["financial_tables"] == set() and before["functions"] == 7
     _seed_tenancy(scratch_db)  # data that exists BEFORE the financial schema does
     seeded = _state(scratch_db)
     assert seeded["schools"] == 3
@@ -134,7 +136,7 @@ def test_the_migration_cycles_in_a_database_with_data(scratch_db: ScratchDb) -> 
     assert down.returncode == 0, down.stderr
     after_down = _state(scratch_db)
     assert after_down["financial_tables"] == set()  # gone, data included
-    assert after_down["functions"] == before["functions"]  # the two context functions only
+    assert after_down["functions"] == before["functions"]  # the 7 of BASE only
     assert after_down["policies"] == before["policies"]
     assert after_down["schools"] == with_data["schools"]  # the schools of the tenancy tables stay
     assert after_down["memberships"] == with_data["memberships"]

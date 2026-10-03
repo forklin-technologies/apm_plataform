@@ -304,7 +304,7 @@ Within a table and a timing, triggers fire in **alphabetical order of their name
 | every table above | `<table>_no_delete`, `<table>_no_truncate` | BEFORE DELETE, BEFORE TRUNCATE (statement) | `forbid_delete`, `forbid_truncate` |
 | `schools` | `schools_10_settings` | AFTER INSERT | `schools_create_settings`: a school is born with its settings |
 
-Other functions: `statement_entries`, `statement_summary`, `org_statement_summary`, `statement_pending`, `closing_entries_hash`, `closing_breakdown`, `verify_closing` (callable by `apm_app`), and `app_org`, `app_school` (tenancy).
+Other functions: `statement_entries`, `statement_summary`, `org_statement_summary`, `statement_pending`, `closing_entries_hash`, `closing_breakdown`, `verify_closing` (callable by `apm_app`), and the functions of the tenancy core and of the authentication, which are not financial and are documented in `docs/tenancy.md` and `docs/auth.md`: the context functions `app_org`, `app_school`, `app_session_id`, `app_user_id` and the three `SECURITY DEFINER` functions of ADR-016, `find_login_identity`, `list_memberships_for_user` and `accept_invitation`.
 
 ## How to create a new financial table
 

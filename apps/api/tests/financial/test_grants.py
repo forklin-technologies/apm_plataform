@@ -221,7 +221,12 @@ UPDATABLE: dict[str, set[str]] = {
 # Columns the application role cannot even READ: only the narrow function of ADR-016 will (TASK-006).
 UNREADABLE: dict[str, set[str]] = {"payment_accounts": {"webhook_secret_hash"}}
 
-# The only functions the application role may call besides the two context functions.
+# The context functions of the tenancy core and of the authentication (0006), and the three
+# SECURITY DEFINER functions of ADR-016: the application role calls them too, and
+# tests/test_app_role.py holds their exact definition.
+CONTEXT_FUNCTIONS = {"app_org", "app_school", "app_session_id", "app_user_id"}
+DEFINER_FUNCTIONS = {"accept_invitation", "find_login_identity", "list_memberships_for_user"}
+# The only functions of the financial schema the application role may call.
 CALLABLE_FUNCTIONS = {
     "statement_entries",
     "statement_summary",
@@ -335,7 +340,7 @@ def test_only_the_statement_functions_are_callable_by_the_application_role(
                 "WHERE n.nspname = 'public' AND a.grantee = 0"
             )
         ).all()
-    assert callable_by_app == CALLABLE_FUNCTIONS | {"app_org", "app_school"}
+    assert callable_by_app == CALLABLE_FUNCTIONS | CONTEXT_FUNCTIONS | DEFINER_FUNCTIONS
     assert public_acl == []  # nothing is executable by PUBLIC
 
 
