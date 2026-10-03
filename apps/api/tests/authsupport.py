@@ -7,6 +7,7 @@ e-mails start with `t4-<suffix>-`, the organizations are the world's own, the at
 found by the (HMAC of the) client addresses the tests used.
 """
 
+import json
 import re
 import uuid
 from collections.abc import Callable, Iterator
@@ -16,6 +17,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
+import pytest
 from fastapi.testclient import TestClient
 from httpx2 import Response
 from pydantic import SecretStr
@@ -310,6 +312,45 @@ class Api:
         return self.post("/api/v1/invitations", body)
 
 
+def no_unhandled_error(caplog: pytest.LogCaptureFixture) -> None:
+    """A 500 is an unhandled exception, and the handler logs it from `app.core.errors`: a test that
+    expects a refusal asserts that line is not in the log."""
+    errors = [r for r in caplog.records if r.name == "app.core.errors" and r.levelno >= 40]
+    assert errors == [], [r.getMessage() for r in errors]
+
+
+def raw_post(
+    api: "Api",
+    path: str,
+    body: Any,
+    *,
+    csrf: bool = False,
+    headers: dict[str, Any] | None = None,
+) -> Response:
+    """POST a JSON body exactly as a hostile client could write it: `ensure_ascii` keeps a lone
+    surrogate (\\ud800) in the text, which the test client's own encoder would refuse."""
+    sent: dict[str, Any] = {"Origin": api.origin, "content-type": "application/json"}
+    if csrf and api.csrf:
+        sent["X-CSRF-Token"] = api.csrf
+    sent.update(headers or {})
+    return api.client.post(path, content=json.dumps(body).encode(), headers=sent)
+
+
+class SpyHasher:
+    """Stands in for the PasswordHasher: records what it is asked to verify, does the real work."""
+
+    def __init__(self, real: Any) -> None:
+        self.real = real
+        self.verified: list[str] = []
+
+    def verify(self, stored_hash: str, password: str) -> bool:
+        self.verified.append(stored_hash)
+        return bool(self.real.verify(stored_hash, password))
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.real, name)
+
+
 @dataclass
 class ApiFactory:
     """Builds clients over the real database, each from its own address (the rate limits are per
@@ -368,6 +409,7 @@ __all__ = [
     "Api",
     "ApiFactory",
     "OutboxMessage",
+    "SpyHasher",
     "TestUser",
     "UserFactory",
     "World",
@@ -375,4 +417,6 @@ __all__ = [
     "create_world",
     "read_outbox",
     "delete_world",
+    "no_unhandled_error",
+    "raw_post",
 ]
