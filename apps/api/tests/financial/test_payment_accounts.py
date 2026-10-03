@@ -9,6 +9,7 @@ that TASK-006 adds will. The tests prove it by the catalog and by trying every w
 
 import re
 import uuid
+from typing import Any
 
 import pytest
 from sqlalchemy import Connection, Engine, text
@@ -190,7 +191,7 @@ def test_the_same_bank_account_is_not_registered_twice_for_a_school(
     world: tuple[Connection, Fresh],
 ) -> None:
     conn, f = world
-    external = conn.execute(
+    external: str = conn.execute(
         text("SELECT external_account_id FROM payment_accounts WHERE id = :a"), {"a": f.account}
     ).scalar_one()
     with (
@@ -325,7 +326,7 @@ def test_the_statistics_of_the_column_are_hidden_from_the_application_role(
     with admin_engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
         conn.exec_driver_sql("ANALYZE payment_accounts")
     with transaction(app_engine, context=TenantContext(tenants.org_a)) as conn:
-        stats: list[str] = (
+        stats: Any = (
             conn.execute(text("SELECT attname FROM pg_stats WHERE tablename = 'payment_accounts'"))
             .scalars()
             .all()
@@ -335,7 +336,7 @@ def test_the_statistics_of_the_column_are_hidden_from_the_application_role(
 
 def test_no_function_of_the_schema_returns_or_mentions_the_hash(admin_engine: Engine) -> None:
     with admin_engine.connect() as conn:
-        mentions: list[str] = (
+        mentions: Any = (
             conn.execute(
                 text(
                     "SELECT p.proname FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
