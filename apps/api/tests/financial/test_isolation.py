@@ -32,6 +32,7 @@ TABLES = [
     "expense_attachments",
     "categories",
     "school_settings",
+    "payment_accounts",
     "pix_charges",
     "webhook_events",
     "audit_logs",
@@ -65,6 +66,7 @@ PRIMARY_KEY = {
     "webhook_events": "id",
     "audit_logs": "id",
     "monthly_closings": "id",
+    "payment_accounts": "id",
 }
 
 Statement = tuple[str, dict[str, Any], str]  # sql, parameters, "count" | "rowcount"
@@ -76,7 +78,8 @@ def _subject(ledger: Ledger, table: str) -> uuid.UUID:
         "contributions": ledger.cash_contribution,
         "expenses": ledger.expense_paid,
         "reimbursements": ledger.reimbursement_pending,
-        "refunds": ledger.refund_pending,
+        "refunds": ledger.refund_requested,
+        "payment_accounts": ledger.payment_account,
         "expense_attachments": ledger.attachment,
         "categories": ledger.category,
         "school_settings": ledger.fresh.school,
@@ -99,8 +102,9 @@ def insert_statement(table: str, ledger: Ledger, org: uuid.UUID, school: uuid.UU
     statements: dict[str, Statement] = {
         "financial_transactions": (
             "INSERT INTO financial_transactions (organization_id, school_id, kind, direction, "
-            "amount_cents, status) VALUES (:org, :school, 'CONTRIBUTION', 'IN', 1000, 'PENDING_PAYMENT')",
-            base,
+            "amount_cents, status, category_id, origin_type) "
+            "VALUES (:org, :school, 'CONTRIBUTION', 'IN', 1000, 'PENDING_PAYMENT', :category, 'GUARDIAN')",
+            {**base, "category": a1.cat_in},
             "rowcount",
         ),
         "contributions": (
@@ -130,8 +134,8 @@ def insert_statement(table: str, ledger: Ledger, org: uuid.UUID, school: uuid.UU
         ),
         "expense_attachments": (
             "INSERT INTO expense_attachments (organization_id, school_id, transaction_id, "
-            "storage_key, file_name, content_type, size_bytes, sha256, uploaded_by_user_id) "
-            "VALUES (:org, :school, :tx, :key, 'nota.pdf', 'application/pdf', 100, :hash, :staff)",
+            "kind, storage_key, file_name, content_type, size_bytes, sha256, uploaded_by_user_id) "
+            "VALUES (:org, :school, :tx, 'INVOICE', :key, 'nota.pdf', 'application/pdf', 100, :hash, :staff)",
             {
                 **base,
                 "tx": ledger.expense_submitted,
@@ -142,8 +146,8 @@ def insert_statement(table: str, ledger: Ledger, org: uuid.UUID, school: uuid.UU
             "rowcount",
         ),
         "categories": (
-            "INSERT INTO categories (organization_id, school_id, key, name, applies_to) "
-            "VALUES (:org, :school, :key, 'Nova', 'IN')",
+            "INSERT INTO categories (organization_id, school_id, key, name, applies_to, report_group) "
+            "VALUES (:org, :school, :key, 'Nova', 'IN', 'OTHER_INCOME')",
             {**base, "key": f"k_{_fresh()}"},
             "rowcount",
         ),
@@ -153,10 +157,22 @@ def insert_statement(table: str, ledger: Ledger, org: uuid.UUID, school: uuid.UU
             "rowcount",
         ),
         "pix_charges": (
-            "INSERT INTO pix_charges (organization_id, school_id, transaction_id, provider, txid, "
-            "amount_cents, expires_at) "
-            "VALUES (:org, :school, :tx, 'SANDBOX', :txid, 3100, now() + interval '30 minutes')",
-            {**base, "tx": ledger.pix_pending_2, "txid": uuid.uuid4().hex},
+            "INSERT INTO pix_charges (organization_id, school_id, transaction_id, payment_account_id, "
+            "provider, txid, amount_cents, expires_at) "
+            "VALUES (:org, :school, :tx, :account, 'SANDBOX', :txid, 3100, now() + interval '30 minutes')",
+            {
+                **base,
+                "tx": ledger.pix_pending_2,
+                "account": ledger.payment_account,
+                "txid": uuid.uuid4().hex,
+            },
+            "rowcount",
+        ),
+        "payment_accounts": (
+            "INSERT INTO payment_accounts (organization_id, school_id, provider, external_account_id, "
+            "status, secret_ref, webhook_secret_hash) "
+            "VALUES (:org, :school, 'SANDBOX', :ext, 'PENDING', 'env:T5_OTHER', :hash)",
+            {**base, "ext": _fresh(), "hash": token_hash()},
             "rowcount",
         ),
         "webhook_events": (
@@ -201,6 +217,7 @@ def _statement(table: str, operation: str, ledger: Ledger, tenants: Tenants) -> 
         "financial_transactions": "SET status = 'CANCELLED'",
         "contributions": "SET guardian_name = NULL",
         "expenses": "SET description = 'Edited'",
+        "payment_accounts": "SET status = 'INACTIVE'",
         "reimbursements": "SET payment_reference = 'r-1'",
         "refunds": "SET payment_reference = 'r-1'",
         "expense_attachments": "SET file_name = 'x.pdf'",
@@ -211,10 +228,10 @@ def _statement(table: str, operation: str, ledger: Ledger, tenants: Tenants) -> 
         "audit_logs": "SET action = 'x.y'",
         "monthly_closings": "SET report_ref = 'r.pdf'",
     }
-    # The subject of an update must be able to change: a pending ledger row, a submitted expense.
+    # The subject of an update must be able to change: a pending ledger row, an expense draft.
     target = {
         "financial_transactions": ledger.pix_pending,
-        "expenses": ledger.expense_submitted,
+        "expenses": ledger.expense_draft,
     }.get(table, subject)
     return f"UPDATE {table} {updates[table]} WHERE {key} = :id", {"id": target}, "rowcount"  # noqa: S608
 
