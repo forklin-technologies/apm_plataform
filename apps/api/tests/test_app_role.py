@@ -338,7 +338,7 @@ def test_context_functions_are_stable_invoker_with_a_fixed_search_path(
 OPEN_POLICIES = {"users_definer_select"}
 
 
-def test_there_is_no_system_mode_and_the_only_open_policy_is_the_login_lookup(
+def test_there_is_no_system_mode_and_the_open_policies_are_the_closed_list_of_apm_definer(
     admin_engine: Engine,
 ) -> None:
     """No bypass switch: no policy is open to everyone and none mentions a system flag."""
