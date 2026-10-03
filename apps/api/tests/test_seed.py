@@ -1,6 +1,7 @@
 """T6: the seed refuses production and only ever creates fake, repeatable data."""
 
 import os
+import re
 import secrets
 import subprocess
 import sys
@@ -11,6 +12,7 @@ from sqlalchemy import Engine, create_engine, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import sessionmaker
 
+from app.auth.passwords import verify_hash
 from app.core.config import AdminSettings
 from app.db.tenant import TenantContext, tenant_session
 from app.models import Organization, School
@@ -96,7 +98,13 @@ def test_seed_creates_only_fake_data_and_is_repeatable(scratch_db: ScratchDb) ->
                 )
             ]
             hashes: Any = connection.execute(
-                text("SELECT count(*) FROM users WHERE password_hash IS NOT NULL")
+                text("SELECT count(*) FROM users WHERE password_hash LIKE '$argon2id$%'")
+            ).scalar_one()
+            distinct: Any = connection.execute(
+                text("SELECT count(DISTINCT password_hash) FROM users")
+            ).scalar_one()
+            sample: Any = connection.execute(
+                text("SELECT password_hash FROM users ORDER BY email LIMIT 1")
             ).scalar_one()
             counts: Any = {
                 table: connection.execute(text(f"SELECT count(*) FROM {table}")).scalar_one()  # noqa: S608
@@ -112,7 +120,14 @@ def test_seed_creates_only_fake_data_and_is_repeatable(scratch_db: ScratchDb) ->
     }
     assert emails and all(e.endswith(f"@{FAKE_EMAIL_DOMAIN}") for e in emails)
     assert slugs and all(s.startswith("demo-") for s in slugs)
-    assert hashes == 0  # no credential of any kind
+    assert hashes == len(USERS)  # every demo user got its own Argon2id hash
+    assert distinct == len(USERS)  # (a salt each: no two hashes are equal)
+    # The password was shown once, on the run that created the users, and it is the right one.
+    shown = re.findall(r"password of the demo users \(shown once\): (\S+)", first.stdout)
+    assert len(shown) == 1
+    assert verify_hash(sample, shown[0])
+    assert "password" not in second.stdout.lower()
+    assert shown[0] not in second.stdout + second.stderr + first.stderr
 
 
 def test_seed_function_is_idempotent_on_a_connection(migrated_scratch_db: ScratchDb) -> None:
@@ -192,3 +207,47 @@ def test_seed_refuses_an_admin_that_cannot_bypass_row_level_security(
     assert password not in result.stdout + result.stderr
     assert result.stdout == ""
     assert after == before
+
+
+def test_seed_uses_the_password_from_the_environment_and_never_prints_it(
+    scratch_db: ScratchDb,
+) -> None:
+    assert run_alembic(scratch_db, "upgrade", "head").returncode == 0
+    chosen = secrets.token_urlsafe(18)
+    env = {
+        "ENV": "development",
+        "DATABASE_URL": scratch_db.app_url,
+        "DATABASE_ADMIN_URL": scratch_db.admin_url,
+        "SEED_PASSWORD": chosen,
+    }
+
+    result = _run_seed(env)
+
+    assert result.returncode == 0, result.stderr
+    assert chosen not in result.stdout + result.stderr
+    assert "shown once" not in result.stdout
+    engine = create_engine(scratch_db.admin_url)
+    try:
+        with engine.connect() as connection:
+            stored: Any = connection.execute(
+                text("SELECT password_hash FROM users WHERE email = :e"), {"e": USERS[0][0]}
+            ).scalar_one()
+    finally:
+        engine.dispose()
+    assert verify_hash(stored, chosen)
+
+
+def test_seed_refuses_a_short_password_before_connecting() -> None:
+    result = _run_seed(
+        {
+            "ENV": "development",
+            "DATABASE_URL": APP_URL,
+            "DATABASE_ADMIN_URL": UNREACHABLE_ADMIN,
+            "SEED_PASSWORD": "short",
+        }
+    )
+
+    assert result.returncode == 1
+    assert "SEED_PASSWORD must have at least 12 characters" in result.stderr
+    assert "connect" not in result.stderr.lower()
+    assert "Traceback" not in result.stderr

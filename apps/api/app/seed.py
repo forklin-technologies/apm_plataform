@@ -2,17 +2,24 @@
 
     docker compose run --rm tools python -m app.seed
 
+The demo users get a password (Argon2id): the value of SEED_PASSWORD, or a random one that is
+printed ONCE when the users are created (never a value fixed in the repository). It is never logged
+and an existing user keeps whatever password it has.
+
 It connects with DATABASE_ADMIN_URL, which in development is a superuser, so it bypasses row level
 security by design: the application role cannot create organizations or users (ADR-014). It is safe
 to run twice: rows that already exist are left alone.
 """
 
 import os
+import secrets
 import sys
 from dataclasses import dataclass, field
 from typing import Any
 
 from sqlalchemy import Connection, create_engine, text
+
+from app.auth.passwords import MIN_LENGTH, hash_password
 
 PRODUCTION_REFUSAL = "refusing to seed: ENV=production. The seed is for development only."
 FAKE_EMAIL_DOMAIN = "example.test"
@@ -57,8 +64,12 @@ class SeedSummary:
     created: dict[str, int] = field(default_factory=dict)
 
 
-def seed(connection: Connection) -> SeedSummary:
-    """Insert the fake data. Idempotent: existing rows (by slug, e-mail or membership) are kept."""
+def seed(connection: Connection, password: str | None = None) -> SeedSummary:
+    """Insert the fake data. Idempotent: existing rows (by slug, e-mail or membership) are kept.
+
+    With a `password`, new users can log in with it (each gets its own Argon2id hash); without
+    one they have no password and cannot log in until they are given one.
+    """
     summary = SeedSummary()
 
     def count(table: str, rows: int) -> None:
@@ -84,13 +95,16 @@ def seed(connection: Connection) -> SeedSummary:
         )
         count("schools", result.rowcount)
     for email, full_name in USERS:
-        # password_hash stays NULL: authentication does not exist yet (TASK-004).
         result = connection.execute(
             text(
-                "INSERT INTO users (email, full_name) VALUES (:email, :full_name) "
-                "ON CONFLICT DO NOTHING"
+                "INSERT INTO users (email, full_name, password_hash) "
+                "VALUES (:email, :full_name, :password_hash) ON CONFLICT DO NOTHING"
             ),
-            {"email": email, "full_name": full_name},
+            {
+                "email": email,
+                "full_name": full_name,
+                "password_hash": None if password is None else hash_password(password),
+            },
         )
         count("users", result.rowcount)
     for email, org_slug, school_slug, role in MEMBERSHIPS:
@@ -121,6 +135,15 @@ def main() -> int:
     if settings.is_production:
         print(PRODUCTION_REFUSAL, file=sys.stderr)
         return 1
+    chosen = os.environ.get("SEED_PASSWORD")
+    if chosen is not None and len(chosen) < MIN_LENGTH:
+        print(
+            f"refusing to seed: SEED_PASSWORD must have at least {MIN_LENGTH} characters",
+            file=sys.stderr,
+        )
+        return 1
+    generated = chosen is None
+    password = secrets.token_urlsafe(18) if chosen is None else chosen
     engine = create_engine(settings.database_admin_url.get_secret_value())
     try:
         with engine.begin() as connection:
@@ -134,11 +157,14 @@ def main() -> int:
                     file=sys.stderr,
                 )
                 return 1
-            summary = seed(connection)
+            summary = seed(connection, password)
     finally:
         engine.dispose()
     for table, created in summary.created.items():
         print(f"{table}: {created} created")
+    if generated and summary.created.get("users"):
+        # Shown once, and only when users were just created with it; SEED_PASSWORD is never echoed.
+        print(f"password of the demo users (shown once): {password}")
     return 0
 
 

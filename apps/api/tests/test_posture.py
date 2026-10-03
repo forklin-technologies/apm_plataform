@@ -15,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine, text
 
-from app.core.config import AdminSettings, Settings
+from app.core.config import AdminSettings, ApiSettings
 from app.db import posture
 from app.db.posture import PostureError, assert_posture, cheap_posture_ok, check_posture
 from app.main import create_app
@@ -42,7 +42,7 @@ def _findings(app_engine: Engine) -> list[str]:
         return check_posture(connection)
 
 
-def _settings(admin_settings: AdminSettings, env: str = "development") -> Settings:
+def _settings(admin_settings: AdminSettings, env: str = "development") -> ApiSettings:
     return make_settings(env=env, database_url=admin_settings.database_url.get_secret_value())
 
 
@@ -183,8 +183,18 @@ def test_connecting_as_a_different_role_is_reported(admin_engine: Engine) -> Non
         assert cheap_posture_ok(connection) is False
 
 
-def test_the_closed_list_of_security_definer_functions_is_empty_for_now() -> None:
-    assert frozenset() == posture.ALLOWED_SECURITY_DEFINER
+def test_the_closed_list_of_security_definer_functions_is_the_three_of_adr_016() -> None:
+    assert (
+        frozenset(
+            {
+                "public.find_login_identity(p_email text)",
+                "public.list_memberships_for_user(p_user_id uuid)",
+                "public.accept_invitation(p_token_hash bytea, p_full_name text, "
+                "p_password_hash text, p_existing_user_id uuid)",
+            }
+        )
+        == posture.ALLOWED_SECURITY_DEFINER
+    )
 
 
 # --- startup -----------------------------------------------------------------------------------
@@ -238,7 +248,7 @@ def test_the_check_is_skipped_only_in_env_test(
 
 
 def test_an_unreachable_database_fails_the_startup_with_a_fixed_message() -> None:
-    settings = Settings(_env_file=None, env="development", database_url=UNREACHABLE)  # type: ignore[call-arg,arg-type]
+    settings = make_settings(env="development", database_url=UNREACHABLE)
 
     with pytest.raises(PostureError) as error, TestClient(create_app(settings)):
         pass

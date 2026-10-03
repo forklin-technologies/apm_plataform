@@ -8,15 +8,17 @@ from typing import Any
 import pytest
 from fastapi import Depends, FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, create_engine, func, inspect, select, text
+from sqlalchemy import Engine, create_engine, event, func, inspect, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import AdminSettings
 from app.db.tenant import TenantContext, apply_tenant_context, bind_tenant, tenant_session
+from app.main import create_app
 from app.models import Membership, School, User
 from app.routers.deps import get_tenant_db
 from tests.dbsupport import Tenants
+from tests.helpers import UNREACHABLE_DATABASE_URL, make_settings
 
 SCHOOLS_IN_A = 2
 
@@ -224,14 +226,17 @@ def test_orm_membership_listing_is_scoped(app_engine: Engine, tenants: Tenants) 
 # --- the example FastAPI dependency -------------------------------------------------------------
 
 
-class _NoDatabase:
-    def __call__(self) -> Session:
+def _example_app() -> FastAPI:
+    """The real app (so the real session and error handling apply) plus one route that uses
+    `get_tenant_db`, over an engine that fails the test if anything tries to connect."""
+    app = create_app(make_settings(), verify_posture=False)
+    engine = create_engine(UNREACHABLE_DATABASE_URL)
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("the database must not be touched before the tenant is known")
 
-
-def _example_app() -> FastAPI:
-    app = FastAPI()
-    app.state.session_factory = _NoDatabase()
+    event.listen(engine, "do_connect", refuse)
+    app.state.session_factory = sessionmaker(bind=engine)
 
     @app.get("/example")
     def example(db: Session = Depends(get_tenant_db)) -> dict[str, int]:  # noqa: B008
@@ -247,13 +252,16 @@ def _example_app() -> FastAPI:
         ({"X-Organization-Id": str(uuid.uuid4())}, {}),
         ({"X-Tenant": str(uuid.uuid4()), "X-School-Id": str(uuid.uuid4())}, {}),
         ({}, {"organization_id": str(uuid.uuid4()), "school_id": str(uuid.uuid4())}),
-        ({"Authorization": "Bearer anything", "Cookie": "session=anything"}, {}),
+        ({"Authorization": "Bearer anything", "Cookie": "apm_session=anything"}, {}),
     ],
     ids=["nothing", "org-header", "tenant-headers", "query", "fake-credentials"],
 )
 def test_example_dependency_answers_401_and_ignores_what_the_client_sends(
     headers: dict[str, str], params: dict[str, str]
 ) -> None:
-    response = TestClient(_example_app()).get("/example", headers=headers, params=params)
+    client = TestClient(_example_app())
+    response = client.get("/example", headers=headers, params=params)
 
     assert response.status_code == 401
+    assert response.json()["code"] == "unauthenticated"
+    assert response.headers["content-type"] == "application/problem+json"

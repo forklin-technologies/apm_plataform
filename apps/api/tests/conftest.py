@@ -1,13 +1,23 @@
 from collections.abc import Iterator
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session
 
-from app.core.config import AdminSettings, Settings, get_admin_settings
+from app.core.config import AdminSettings, ApiSettings, get_admin_settings
 from app.db.session import get_db
 from app.main import create_app
+from tests.authsupport import (
+    Api,
+    ApiFactory,
+    UserFactory,
+    World,
+    api_factory,
+    create_world,
+    delete_world,
+)
 from tests.dbsupport import (
     ScratchDb,
     Tenants,
@@ -16,17 +26,17 @@ from tests.dbsupport import (
     run_alembic,
     scratch_database,
 )
-from tests.helpers import UNREACHABLE_DATABASE_URL, make_settings
+from tests.helpers import TEST_SECRET, UNREACHABLE_DATABASE_URL, make_settings
 
 
 @pytest.fixture
-def isolated_settings() -> Settings:
+def isolated_settings() -> ApiSettings:
     """Settings that never read env files or the real database."""
     return make_settings()
 
 
 @pytest.fixture
-def client(isolated_settings: Settings) -> Iterator[TestClient]:
+def client(isolated_settings: ApiSettings) -> Iterator[TestClient]:
     """App without a usable database. Good for anything that must not touch Postgres."""
     with TestClient(create_app(isolated_settings)) as test_client:
         yield test_client
@@ -40,7 +50,7 @@ def db_client() -> Iterator[TestClient]:
 
 
 @pytest.fixture
-def db_down_client(isolated_settings: Settings) -> Iterator[TestClient]:
+def db_down_client(isolated_settings: ApiSettings) -> Iterator[TestClient]:
     """App whose get_db dependency is overridden with an engine that cannot connect."""
     app = create_app(isolated_settings)
 
@@ -119,3 +129,35 @@ def migrated_scratch_db(admin_settings: AdminSettings) -> Iterator[ScratchDb]:
         result = run_alembic(database, "upgrade", "head")
         assert result.returncode == 0, result.stderr
         yield database
+
+
+# --- the API over the real database (the authentication tests) ----------------------------------
+
+
+@pytest.fixture(scope="session")
+def world(admin_engine: Engine, admin_settings: AdminSettings) -> Iterator[World]:
+    """Two organizations on the CONFIGURED database. Users are made per test (`users`)."""
+    with admin_engine.begin() as connection:
+        created = create_world(connection)
+    try:
+        yield created
+    finally:
+        with admin_engine.begin() as connection:
+            delete_world(connection, created, TEST_SECRET)
+
+
+@pytest.fixture
+def users(admin_engine: Engine, world: World) -> UserFactory:
+    return UserFactory(admin_engine, world)
+
+
+@pytest.fixture
+def apis(world: World, admin_settings: AdminSettings, tmp_path: Path) -> Iterator[ApiFactory]:
+    """`make()` builds a client for the app wired to the real database, with its own outbox."""
+    with api_factory(world, admin_settings.database_url.get_secret_value(), tmp_path) as factory:
+        yield factory
+
+
+@pytest.fixture
+def api(apis: ApiFactory) -> Api:
+    return apis.make()

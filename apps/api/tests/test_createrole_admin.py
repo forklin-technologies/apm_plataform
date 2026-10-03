@@ -151,7 +151,11 @@ def test_upgrade_creates_everything_as_a_createrole_admin(clean_cluster: CleanCl
     result = run_alembic(clean_cluster.database, "upgrade", "head")
 
     assert result.returncode == 0, result.stderr
-    assert _catalog(clean_cluster) == {"tables": EXPECTED_TABLES, "policies": EXPECTED_POLICIES, "functions": EXPECTED_FUNCTIONS}
+    assert _catalog(clean_cluster) == {
+        "tables": EXPECTED_TABLES,
+        "policies": EXPECTED_POLICIES,
+        "functions": EXPECTED_FUNCTIONS,
+    }
     # (superuser, bypassrls, replication, createdb, createrole, login, inherit)
     assert _roles(clean_cluster) == {
         "apm_app": (False, False, False, False, False, True, False),
@@ -202,7 +206,11 @@ def test_downgrade_and_upgrade_again_work_for_that_admin(clean_cluster: CleanClu
     assert _roles(clean_cluster) == {}  # the admin created them, so it can drop them
     again = run_alembic(clean_cluster.database, "upgrade", "head")
     assert again.returncode == 0, again.stderr
-    assert _catalog(clean_cluster) == {"tables": EXPECTED_TABLES, "policies": EXPECTED_POLICIES, "functions": EXPECTED_FUNCTIONS}
+    assert _catalog(clean_cluster) == {
+        "tables": EXPECTED_TABLES,
+        "policies": EXPECTED_POLICIES,
+        "functions": EXPECTED_FUNCTIONS,
+    }
     repeated = run_alembic(clean_cluster.database, "upgrade", "head")
     assert repeated.returncode == 0 and "Running upgrade" not in repeated.stderr
 
