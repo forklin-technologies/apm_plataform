@@ -102,8 +102,7 @@ def _create_support_tables() -> None:
             CONSTRAINT ck_categories_key_format CHECK (key ~ '^[a-z0-9_]{{1,40}}$'),
             CONSTRAINT ck_categories_name_length CHECK (length(btrim(name)) BETWEEN 1 AND 80),
             CONSTRAINT ck_categories_applies_to_valid CHECK (applies_to IN ('IN', 'OUT')),
-            CONSTRAINT ck_categories_report_group_valid CHECK (
-                report_group IN ('CONTRIBUTIONS', 'OTHER_INCOME', 'EXPENSES_REIMBURSEMENTS', 'REFUNDS')),
+            -- The only valid groups, per direction (a report_group CHECK of its own would be implied).
             CONSTRAINT ck_categories_group_matches_direction CHECK (
                 (applies_to = 'IN' AND report_group IN ('CONTRIBUTIONS', 'OTHER_INCOME', 'REFUNDS'))
                 OR (applies_to = 'OUT' AND report_group = 'EXPENSES_REIMBURSEMENTS'))

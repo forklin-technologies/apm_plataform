@@ -60,11 +60,6 @@ class Category(ScopeMixin, TimestampMixin, Base):
         CheckConstraint("length(btrim(name)) BETWEEN 1 AND 80", name="name_length"),
         CheckConstraint("applies_to IN ('IN', 'OUT')", name="applies_to_valid"),
         CheckConstraint(
-            "report_group IN ('CONTRIBUTIONS', 'OTHER_INCOME', "
-            "'EXPENSES_REIMBURSEMENTS', 'REFUNDS')",
-            name="report_group_valid",
-        ),
-        CheckConstraint(
             "(applies_to = 'IN' AND report_group IN ('CONTRIBUTIONS', 'OTHER_INCOME', 'REFUNDS')) "
             "OR (applies_to = 'OUT' AND report_group = 'EXPENSES_REIMBURSEMENTS')",
             name="group_matches_direction",
