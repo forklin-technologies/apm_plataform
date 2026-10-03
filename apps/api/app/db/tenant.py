@@ -24,9 +24,10 @@ SCHOOL_SETTING = "app.school_id"
 _CONTEXT_KEY = "tenant_context"
 _LISTENER_KEY = "tenant_context_listener"
 
+# Literal on purpose (the names above are the same): no SQL is ever built from a string.
 _SET_CONTEXT = text(
-    f"SELECT set_config('{ORGANIZATION_SETTING}', :organization_id, true), "
-    f"set_config('{SCHOOL_SETTING}', :school_id, true)"
+    "SELECT set_config('app.organization_id', :organization_id, true), "
+    "set_config('app.school_id', :school_id, true)"
 )
 
 

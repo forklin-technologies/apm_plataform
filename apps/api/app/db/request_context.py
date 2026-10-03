@@ -37,11 +37,12 @@ _KEY = "request_context"
 _LISTENER_KEY = "request_context_listener"
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{8,64}$")
 
+# Literal on purpose (the names above are the same): no SQL is ever built from a string.
 _SET = text(
-    f"SELECT set_config('{SESSION_SETTING}', :session_id, true), "
-    f"set_config('{USER_SETTING}', :user_id, true), "
-    f"set_config('{REQUEST_SETTING}', :request_id, true), "
-    f"set_config('{ACTOR_SETTING}', :actor_type, true)"
+    "SELECT set_config('app.session_id', :session_id, true), "
+    "set_config('app.user_id', :user_id, true), "
+    "set_config('app.request_id', :request_id, true), "
+    "set_config('app.actor_type', :actor_type, true)"
 )
 
 
