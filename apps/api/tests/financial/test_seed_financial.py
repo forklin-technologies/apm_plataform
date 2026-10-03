@@ -10,7 +10,7 @@ from app.seed import seed
 from app.seed_financial import DEFAULT_CATEGORIES
 from tests.dbsupport import ScratchDb, run_alembic, transaction
 
-MOVEMENTS_PER_SCHOOL = 13  # 3 cash, 2 Pix, 5 expenses, 2 reimbursements, 1 refund
+MOVEMENTS_PER_SCHOOL = 18  # 7 contributions, 7 expenses, 2 reimbursements, 2 devoluções
 
 
 def test_the_seed_writes_categories_and_demonstration_movements_and_repeats_cleanly(
@@ -34,7 +34,7 @@ def test_the_seed_writes_categories_and_demonstration_movements_and_repeats_clea
             for school in ("demo-aurora", "demo-horizonte", "demo-central"):
                 rows = connection.execute(
                     text(
-                        "SELECT c.key, c.name, c.applies_to FROM categories c "
+                        "SELECT c.key, c.name, c.applies_to, c.report_group FROM categories c "
                         "JOIN schools s ON s.id = c.school_id WHERE s.slug = :s ORDER BY c.key"
                     ),
                     {"s": school},
@@ -71,7 +71,31 @@ def test_the_seed_writes_categories_and_demonstration_movements_and_repeats_clea
                         {"s": school},
                     )
                 }
-                assert sections == {"RECEIVABLE", "PAYABLE", "AWAITING_APPROVAL"}
+                assert sections == {
+                    "RECEIVABLE", "PAYABLE", "AWAITING_APPROVAL", "AWAITING_CORRECTION", "REVIEW"
+                }  # fmt: skip
+                # Every state of the product document is represented, and no credential is stored.
+                states = {
+                    r[0]
+                    for r in connection.execute(
+                        text(
+                            "SELECT DISTINCT f.status FROM financial_transactions f "
+                            "JOIN schools s ON s.id = f.school_id WHERE s.slug = :s"
+                        ),
+                        {"s": school},
+                    )
+                }
+                assert {"DRAFT", "SUBMITTED", "CORRECTION_REQUESTED", "APPROVED", "PAID",
+                        "REVIEW_REQUIRED", "PENDING_PAYMENT", "CONFIRMED", "REQUESTED",
+                        "PENDING"} <= states  # fmt: skip
+                account = connection.execute(
+                    text(
+                        "SELECT status, secret_ref FROM payment_accounts a "
+                        "JOIN schools s ON s.id = a.school_id WHERE s.slug = :s"
+                    ),
+                    {"s": school},
+                ).one()
+                assert tuple(account) == ("ACTIVE", "env:APM_DEMO_PIX_SECRET")
             # Only fake data, and the audit of the demonstration is attributed to the system.
             names = [
                 r[0]
