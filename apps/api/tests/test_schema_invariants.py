@@ -85,7 +85,11 @@ def test_every_organization_id_column_is_not_null(admin_engine: Engine) -> None:
             )
         ).all()
 
-    assert [tuple(r) for r in rows] == [("memberships", True), ("schools", True)]
+    assert [tuple(r) for r in rows] == [
+        ("invitations", True),
+        ("memberships", True),
+        ("schools", True),
+    ]
 
 
 def test_schools_and_memberships_refuse_a_missing_organization(
@@ -159,6 +163,38 @@ def test_a_slug_with_a_good_format_is_accepted(
 # --- S4 to S6: the foreign keys exist, with the exact shape and RESTRICT -------------------------
 
 EXPECTED_FOREIGN_KEYS = {
+    "fk_invitations_accepted_user_id_users": (
+        "invitations",
+        "users",
+        "accepted_user_id",
+        "id",
+    ),
+    "fk_invitations_invited_by_user_id_users": (
+        "invitations",
+        "users",
+        "invited_by_user_id",
+        "id",
+    ),
+    "fk_invitations_organization_id_organizations": (
+        "invitations",
+        "organizations",
+        "organization_id",
+        "id",
+    ),
+    "fk_invitations_school_id_organization_id_schools": (
+        "invitations",
+        "schools",
+        "school_id,organization_id",
+        "id,organization_id",
+    ),
+    # A session can only point at a membership of ITS OWN user (composite key, 0006).
+    "fk_sessions_membership_id_user_id_memberships": (
+        "sessions",
+        "memberships",
+        "membership_id,user_id",
+        "id,user_id",
+    ),
+    "fk_sessions_user_id_users": ("sessions", "users", "user_id", "id"),
     "fk_memberships_organization_id_organizations": (
         "memberships",
         "organizations",

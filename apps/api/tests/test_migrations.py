@@ -16,7 +16,18 @@ from app.core.config import AdminSettings
 from app.db.base import Base
 from tests.dbsupport import API_DIR, ScratchDb, run_alembic
 
-EXPECTED_TABLES = {"alembic_version", "memberships", "organizations", "schools", "users"}
+EXPECTED_TABLES = {
+    "alembic_version",
+    "invitations",
+    "login_attempts",
+    "memberships",
+    "organizations",
+    "schools",
+    "sessions",
+    "users",
+}
+EXPECTED_POLICIES = 30  # 11 of TASK-003 + the ones of 0006 (sessions, login_attempts, invitations, apm_definer)
+EXPECTED_FUNCTIONS = 7  # app_org, app_school, app_session_id, app_user_id + the 3 SECURITY DEFINER
 CANARY_PASSWORD = "CanaryPw7Hx3Zq"  # noqa: S105  (fake, only ever used offline or in a unit test)
 
 
@@ -66,13 +77,15 @@ def test_upgrade_from_an_empty_database_creates_everything(scratch_db: ScratchDb
     result = run_alembic(scratch_db, "upgrade", "head")
 
     assert result.returncode == 0, result.stderr
-    assert _catalog(scratch_db) == {"tables": EXPECTED_TABLES, "policies": 11, "functions": 2}
+    assert _catalog(scratch_db) == {"tables": EXPECTED_TABLES, "policies": EXPECTED_POLICIES, "functions": EXPECTED_FUNCTIONS}
     current = run_alembic(scratch_db, "current")
-    assert "0005_tenancy_write_grants (head)" in current.stdout + current.stderr
+    assert "0006_auth_sessions (head)" in current.stdout + current.stderr
     admin = _admin_engine(scratch_db)
     try:
         assert _role(admin, "apm_app") == (False, False, True, False, False)
         assert _role(admin, "apm_owner") == (False, False, False, False, False)
+        # apm_definer: not a superuser, no BYPASSRLS, cannot log in, no CREATEROLE/CREATEDB
+        assert _role(admin, "apm_definer") == (False, False, False, False, False)
     finally:
         admin.dispose()
 
@@ -89,7 +102,7 @@ def test_downgrade_to_base_undoes_everything_in_that_database(scratch_db: Scratc
         with admin.connect() as connection:
             # Roles are cluster-wide and may survive because the development database still uses
             # them, but they must hold no privilege left in the database that was downgraded.
-            for role in ("apm_app", "apm_owner"):
+            for role in ("apm_app", "apm_owner", "apm_definer"):
                 if _role(admin, role) is None:
                     continue
                 grants = connection.execute(
@@ -118,7 +131,7 @@ def test_upgrade_is_idempotent_and_repeatable(scratch_db: ScratchDb) -> None:
     result = run_alembic(scratch_db, "upgrade", "head")
 
     assert result.returncode == 0, result.stderr
-    assert _catalog(scratch_db) == {"tables": EXPECTED_TABLES, "policies": 11, "functions": 2}
+    assert _catalog(scratch_db) == {"tables": EXPECTED_TABLES, "policies": EXPECTED_POLICIES, "functions": EXPECTED_FUNCTIONS}
 
 
 def test_upgrade_repairs_a_tampered_application_role(scratch_db: ScratchDb) -> None:

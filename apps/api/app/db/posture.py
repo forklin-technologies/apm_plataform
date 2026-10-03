@@ -15,6 +15,9 @@ from sqlalchemy import Connection, text
 from app.core.config import APP_DB_ROLE
 
 TENANT_TABLES = ("organizations", "schools", "users", "memberships")
+# Every table with row level security: the tenant tables plus the authentication tables.
+RLS_TABLES = (*TENANT_TABLES, "sessions", "login_attempts", "invitations")
+DEFINER_ROLE = "apm_definer"
 
 # Who owns the tenant tables.
 EXPECTED_TABLE_OWNER = "apm_owner"
@@ -35,12 +38,41 @@ EXPECTED_POLICIES: frozenset[tuple[str, str, str, str]] = frozenset(
         ("memberships", "memberships_update", "UPDATE", "public"),
         ("memberships", "memberships_delete", "DELETE", "public"),
         ("users", "users_select", "SELECT", "public"),
+        # 0006: sessions are visible only to whoever holds the token (or is the logged-in user).
+        ("sessions", "sessions_select", "SELECT", "public"),
+        ("sessions", "sessions_insert", "INSERT", "public"),
+        ("sessions", "sessions_update", "UPDATE", "public"),
+        ("login_attempts", "login_attempts_select", "SELECT", "public"),
+        ("login_attempts", "login_attempts_insert", "INSERT", "public"),
+        ("login_attempts", "login_attempts_delete", "DELETE", "public"),
+        ("invitations", "invitations_select", "SELECT", "public"),
+        ("invitations", "invitations_insert", "INSERT", "public"),
+        ("invitations", "invitations_update", "UPDATE", "public"),
+        ("users", "users_select_self", "SELECT", "public"),
+        ("users", "users_update_self", "UPDATE", "public"),
+        # The ONLY permissive policies for apm_definer (ADR-016): one per table and command that
+        # the three SECURITY DEFINER functions need, no more.
+        ("users", "users_definer_select", "SELECT", "apm_definer"),
+        ("users", "users_definer_insert", "INSERT", "apm_definer"),
+        ("memberships", "memberships_definer_select", "SELECT", "apm_definer"),
+        ("memberships", "memberships_definer_insert", "INSERT", "apm_definer"),
+        ("organizations", "organizations_definer_select", "SELECT", "apm_definer"),
+        ("schools", "schools_definer_select", "SELECT", "apm_definer"),
+        ("invitations", "invitations_definer_select", "SELECT", "apm_definer"),
+        ("invitations", "invitations_definer_update", "UPDATE", "apm_definer"),
     }
 )
 
 # The SECURITY DEFINER functions that may exist, as `schema.name(argument types)`. The list is
-# closed on purpose and empty until TASK-004 adds the approved ones (ADR-016).
-ALLOWED_SECURITY_DEFINER: frozenset[str] = frozenset()
+# closed on purpose: the three of TASK-004 (ADR-016); the financial tasks add theirs by an ADR.
+ALLOWED_SECURITY_DEFINER: frozenset[str] = frozenset(
+    {
+        "public.find_login_identity(p_email text)",
+        "public.list_memberships_for_user(p_user_id uuid)",
+        "public.accept_invitation(p_token_hash bytea, p_full_name text, p_password_hash text, "
+        "p_existing_user_id uuid)",
+    }
+)
 
 _ROLE_QUERY = text(
     "SELECT current_user, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb, rolreplication "
@@ -50,6 +82,10 @@ _TABLES_QUERY = text(
     "SELECT c.relname, c.relrowsecurity, c.relforcerowsecurity FROM pg_class c "
     "JOIN pg_namespace n ON n.oid = c.relnamespace "
     "WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relname = ANY(:tables)"
+)
+_DEFINER_ROLE_QUERY = text(
+    "SELECT rolsuper, rolbypassrls, rolreplication, rolcreatedb, rolcreaterole, rolcanlogin "
+    "FROM pg_roles WHERE rolname = :role"
 )
 _DEFINERS_QUERY = text(
     "SELECT n.nspname || '.' || p.proname "
@@ -105,11 +141,9 @@ def check_posture(connection: Connection) -> list[str]:
 
     tables = {
         name: (enabled, forced)
-        for name, enabled, forced in connection.execute(
-            _TABLES_QUERY, {"tables": list(TENANT_TABLES)}
-        )
+        for name, enabled, forced in connection.execute(_TABLES_QUERY, {"tables": list(RLS_TABLES)})
     }
-    for table in TENANT_TABLES:
+    for table in RLS_TABLES:
         if table not in tables:
             findings.append(f"table_missing:{table}")
             continue
@@ -119,12 +153,19 @@ def check_posture(connection: Connection) -> list[str]:
         if not forced:
             findings.append(f"rls_not_forced:{table}")
 
+    # The role that owns the SECURITY DEFINER functions is unprivileged too: no login, no bypass.
+    definer = connection.execute(_DEFINER_ROLE_QUERY, {"role": DEFINER_ROLE}).one_or_none()
+    if definer is None:
+        findings.append("definer_role_missing")
+    elif any(tuple(definer)[:5]) or definer[5]:
+        findings.append("definer_role_unexpected_attributes")
+
     # The application role must be a member of NO role: not the owner (it could SET ROLE to it) and
     # not a predefined one such as pg_read_all_data (it would read around the policies).
     for (member_of,) in connection.execute(_MEMBERSHIPS_QUERY):
         findings.append(f"role_membership:{member_of}")
 
-    for table, owner in connection.execute(_OWNERS_QUERY, {"tables": list(TENANT_TABLES)}):
+    for table, owner in connection.execute(_OWNERS_QUERY, {"tables": list(RLS_TABLES)}):
         if owner != EXPECTED_TABLE_OWNER:
             findings.append(f"table_owner_unexpected:{table}")
 

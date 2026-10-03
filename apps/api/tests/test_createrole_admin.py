@@ -23,7 +23,19 @@ from tests.dbsupport import ScratchDb, run_alembic
 
 CI_ADMIN = "apm_ci_admin"
 DATABASE = "apm_h1"
-EXPECTED_TABLES = {"alembic_version", "memberships", "organizations", "schools", "users"}
+EXPECTED_TABLES = {
+    "alembic_version",
+    "invitations",
+    "login_attempts",
+    "memberships",
+    "organizations",
+    "schools",
+    "sessions",
+    "users",
+}
+EXPECTED_POLICIES = 30
+EXPECTED_FUNCTIONS = 7
+CREATED_ROLES = ("apm_app", "apm_owner", "apm_definer")
 
 
 @dataclass(frozen=True)
@@ -42,7 +54,7 @@ def _wipe(superuser_url: str) -> None:
     try:
         with engine.connect() as connection:
             connection.execute(text(f'DROP DATABASE IF EXISTS "{DATABASE}" WITH (FORCE)'))
-            for role in ("apm_app", "apm_owner", CI_ADMIN):
+            for role in (*CREATED_ROLES, CI_ADMIN):
                 exists = connection.execute(
                     text("SELECT 1 FROM pg_roles WHERE rolname = :r"), {"r": role}
                 ).scalar_one_or_none()
@@ -103,7 +115,8 @@ def _roles(cluster: CleanCluster) -> dict[str, tuple[Any, ...]]:
     rows = _query(
         cluster.superuser_url,
         "SELECT rolname, rolsuper, rolbypassrls, rolreplication, rolcreatedb, rolcreaterole, "
-        "rolcanlogin, rolinherit FROM pg_roles WHERE rolname IN ('apm_app', 'apm_owner')",
+        "rolcanlogin, rolinherit FROM pg_roles "
+        "WHERE rolname IN ('apm_app', 'apm_owner', 'apm_definer')",
     )
     return {row[0]: row[1:] for row in rows}
 
@@ -138,11 +151,12 @@ def test_upgrade_creates_everything_as_a_createrole_admin(clean_cluster: CleanCl
     result = run_alembic(clean_cluster.database, "upgrade", "head")
 
     assert result.returncode == 0, result.stderr
-    assert _catalog(clean_cluster) == {"tables": EXPECTED_TABLES, "policies": 11, "functions": 2}
+    assert _catalog(clean_cluster) == {"tables": EXPECTED_TABLES, "policies": EXPECTED_POLICIES, "functions": EXPECTED_FUNCTIONS}
     # (superuser, bypassrls, replication, createdb, createrole, login, inherit)
     assert _roles(clean_cluster) == {
         "apm_app": (False, False, False, False, False, True, False),
         "apm_owner": (False, False, False, False, False, False, True),
+        "apm_definer": (False, False, False, False, False, False, True),
     }
     owners = {
         r[0]: r[1]
@@ -153,6 +167,20 @@ def test_upgrade_creates_everything_as_a_createrole_admin(clean_cluster: CleanCl
         )
     }
     assert set(owners.values()) == {"apm_owner"}
+    function_owners = {
+        row[0]: row[1]
+        for row in _query(
+            clean_cluster.admin_url,
+            "SELECT p.proname, pg_get_userbyid(p.proowner) FROM pg_proc p "
+            "JOIN pg_namespace n ON n.oid = p.pronamespace "
+            "WHERE n.nspname = 'public' AND p.prosecdef",
+        )
+    }
+    assert function_owners == {
+        "find_login_identity": "apm_definer",
+        "list_memberships_for_user": "apm_definer",
+        "accept_invitation": "apm_definer",
+    }
 
     # The application role can log in with the password from DATABASE_URL and passes the posture.
     engine = create_engine(clean_cluster.app_url)
@@ -174,7 +202,7 @@ def test_downgrade_and_upgrade_again_work_for_that_admin(clean_cluster: CleanClu
     assert _roles(clean_cluster) == {}  # the admin created them, so it can drop them
     again = run_alembic(clean_cluster.database, "upgrade", "head")
     assert again.returncode == 0, again.stderr
-    assert _catalog(clean_cluster) == {"tables": EXPECTED_TABLES, "policies": 11, "functions": 2}
+    assert _catalog(clean_cluster) == {"tables": EXPECTED_TABLES, "policies": EXPECTED_POLICIES, "functions": EXPECTED_FUNCTIONS}
     repeated = run_alembic(clean_cluster.database, "upgrade", "head")
     assert repeated.returncode == 0 and "Running upgrade" not in repeated.stderr
 
@@ -271,4 +299,43 @@ def test_the_documented_remedy_works_admin_option_on_the_existing_roles(
     result = run_alembic(clean_cluster.database, "upgrade", "head")
 
     assert result.returncode == 0, result.stderr
-    assert _catalog(clean_cluster)["policies"] == 11
+    assert _catalog(clean_cluster)["policies"] == EXPECTED_POLICIES
+
+
+def _upgrade_to_0005_then_create_definer_as_superuser(clean_cluster: CleanCluster) -> None:
+    upgraded = run_alembic(clean_cluster.database, "upgrade", "0005_tenancy_write_grants")
+    assert upgraded.returncode == 0, upgraded.stderr
+    engine = create_engine(clean_cluster.superuser_url, isolation_level="AUTOCOMMIT")
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("CREATE ROLE apm_definer NOLOGIN"))
+    finally:
+        engine.dispose()
+
+
+def test_a_definer_role_created_by_somebody_else_is_refused_with_a_clear_message(
+    clean_cluster: CleanCluster,
+) -> None:
+    """The role of revision 0006 follows the same rule as the two before it: the admin must be able
+    to administer it, and when it cannot, the message says so (nothing half-applied)."""
+    _upgrade_to_0005_then_create_definer_as_superuser(clean_cluster)
+
+    result = run_alembic(clean_cluster.database, "upgrade", "head")
+
+    assert result.returncode != 0
+    assert "cannot create or administer the role apm_definer" in result.stderr
+    current = run_alembic(clean_cluster.database, "current")
+    assert "0005_tenancy_write_grants" in current.stdout + current.stderr
+
+
+def test_the_definer_role_remedy_works_admin_option_on_the_existing_role(
+    clean_cluster: CleanCluster,
+) -> None:
+    _upgrade_to_0005_then_create_definer_as_superuser(clean_cluster)
+    _tamper(clean_cluster, f"GRANT apm_definer TO {CI_ADMIN} WITH ADMIN OPTION")
+
+    result = run_alembic(clean_cluster.database, "upgrade", "head")
+
+    assert result.returncode == 0, result.stderr
+    assert _catalog(clean_cluster)["policies"] == EXPECTED_POLICIES
+    assert _roles(clean_cluster)["apm_definer"][:6] == (False, False, False, False, False, False)

@@ -6,6 +6,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Text,
+    UniqueConstraint,
     Uuid,
     text,
 )
@@ -41,6 +42,8 @@ class Membership(TimestampMixin, Base):
             ondelete="RESTRICT",
             name="fk_memberships_school_id_organization_id_schools",
         ),
+        # Target of the composite foreign key (membership_id, user_id) of `sessions`.
+        UniqueConstraint("id", "user_id", name="uq_memberships_id_user_id"),
         CheckConstraint(_in_list("role", ROLES), name="role_valid"),
         CheckConstraint(_in_list("status", STATUSES), name="status_valid"),
         CheckConstraint(

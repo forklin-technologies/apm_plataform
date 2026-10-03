@@ -11,6 +11,7 @@ from app.db.tenant import TenantContext
 from tests.dbsupport import Tenants, transaction
 
 TABLES = ["organizations", "schools", "users", "memberships"]
+AUTH_TABLES = ["sessions", "login_attempts", "invitations"]
 
 
 def test_application_role_is_unprivileged(app_engine: Engine) -> None:
@@ -52,10 +53,10 @@ def test_tables_have_rls_enabled_and_forced(admin_engine: Engine) -> None:
                 "SELECT relname, relrowsecurity, relforcerowsecurity FROM pg_class "
                 "WHERE relname = ANY(:t) AND relkind = 'r' ORDER BY relname"
             ),
-            {"t": TABLES},
+            {"t": [*TABLES, *AUTH_TABLES]},
         ).all()
 
-    assert rows == [(name, True, True) for name in sorted(TABLES)]
+    assert rows == [(name, True, True) for name in sorted([*TABLES, *AUTH_TABLES])]
 
 
 def test_owner_role_cannot_log_in_and_is_not_a_superuser(admin_engine: Engine) -> None:
@@ -171,17 +172,143 @@ def test_role_password_hashes_are_not_readable(app_engine: Engine) -> None:
         connection.execute(text("SELECT rolpassword FROM pg_authid"))
 
 
-def test_no_security_definer_function_exists(admin_engine: Engine) -> None:
+# The closed list (ADR-016): every function in the public schema, with everything that decides what
+# it can do. Adding a SECURITY DEFINER function, changing the owner, the search_path or who may
+# execute one, or adding a policy that lets apm_definer through, fails here until the list (and the
+# ADR) change on purpose.
+FUNCTIONS = {
+    # signature: (owner, security definer, proconfig, ACL, volatility)
+    "accept_invitation(bytea,text,text,uuid)": (
+        "apm_definer",
+        True,
+        ["search_path=pg_catalog"],
+        {"apm_definer=X/apm_definer", "apm_app=X/apm_definer"},
+        "v",
+    ),
+    "find_login_identity(text)": (
+        "apm_definer",
+        True,
+        ["search_path=pg_catalog"],
+        {"apm_definer=X/apm_definer", "apm_app=X/apm_definer"},
+        "s",
+    ),
+    "list_memberships_for_user(uuid)": (
+        "apm_definer",
+        True,
+        ["search_path=pg_catalog"],
+        {"apm_definer=X/apm_definer", "apm_app=X/apm_definer"},
+        "s",
+    ),
+    **{
+        f"{name}()": (
+            "apm_owner",
+            False,
+            ["search_path=pg_catalog"],
+            {"apm_owner=X/apm_owner", "apm_app=X/apm_owner", "apm_definer=X/apm_owner"},
+            "s",
+        )
+        for name in ("app_org", "app_school", "app_session_id", "app_user_id")
+    },
+}
+# table.policy for every permissive policy that applies to apm_definer (TO apm_definer).
+DEFINER_POLICIES = {
+    "invitations.invitations_definer_select",
+    "invitations.invitations_definer_update",
+    "memberships.memberships_definer_insert",
+    "memberships.memberships_definer_select",
+    "organizations.organizations_definer_select",
+    "schools.schools_definer_select",
+    "users.users_definer_insert",
+    "users.users_definer_select",
+}
+
+
+def test_the_functions_of_the_public_schema_are_exactly_the_closed_list(
+    admin_engine: Engine,
+) -> None:
     with admin_engine.connect() as connection:
-        definers = connection.execute(
+        rows = connection.execute(
             text(
-                "SELECT n.nspname || '.' || p.proname FROM pg_proc p "
+                "SELECT p.oid::regprocedure::text, pg_get_userbyid(p.proowner), p.prosecdef, "
+                "p.proconfig, p.proacl::text[], p.provolatile::text FROM pg_proc p "
                 "JOIN pg_namespace n ON n.oid = p.pronamespace "
-                "WHERE p.prosecdef AND n.nspname NOT IN ('pg_catalog', 'information_schema')"
+                "WHERE n.nspname NOT IN ('pg_catalog', 'information_schema') "
+                "AND p.prokind = 'f'"
             )
         ).all()
 
-    assert definers == []
+    found = {
+        row[0].removeprefix("public."): (row[1], row[2], row[3], set(row[4] or []), row[5])
+        for row in rows
+    }
+    assert found == FUNCTIONS
+
+
+def test_no_security_definer_function_is_owned_by_a_role_that_bypasses_row_level_security(
+    admin_engine: Engine,
+) -> None:
+    with admin_engine.connect() as connection:
+        owners = connection.execute(
+            text(
+                "SELECT DISTINCT r.rolname, r.rolsuper, r.rolbypassrls, r.rolcanlogin "
+                "FROM pg_proc p JOIN pg_roles r ON r.oid = p.proowner WHERE p.prosecdef "
+                "AND p.pronamespace = 'public'::regnamespace"
+            )
+        ).all()
+
+    assert [tuple(row) for row in owners] == [("apm_definer", False, False, False)]
+
+
+def test_the_policies_that_let_apm_definer_through_are_exactly_the_closed_list(
+    admin_engine: Engine,
+) -> None:
+    """Row level security is not bypassed anywhere: apm_definer sees a row only through one of
+    these policies, each of them written for it (`TO apm_definer`)."""
+    with admin_engine.connect() as connection:
+        rows = connection.execute(
+            text(
+                "SELECT tablename || '.' || policyname, roles::text[], permissive FROM pg_policies "
+                "WHERE roles::text[] && ARRAY['apm_definer', 'public']"
+            )
+        ).all()
+
+    to_definer = {r[0] for r in rows if r[1] == ["apm_definer"]}
+    assert to_definer == DEFINER_POLICIES
+    assert {r[2] for r in rows} == {"PERMISSIVE"}  # and no RESTRICTIVE one hides behind the list
+
+
+def test_apm_definer_owns_nothing_but_its_functions_and_has_no_other_membership(
+    admin_engine: Engine,
+) -> None:
+    with admin_engine.connect() as connection:
+        owned_relations = connection.execute(
+            text(
+                "SELECT c.relname FROM pg_class c WHERE c.relowner = "
+                "(SELECT oid FROM pg_roles WHERE rolname = 'apm_definer')"
+            )
+        ).all()
+        members_of = connection.execute(
+            text(
+                "SELECT g.rolname FROM pg_auth_members m JOIN pg_roles g ON g.oid = m.roleid "
+                "JOIN pg_roles u ON u.oid = m.member WHERE u.rolname = 'apm_definer'"
+            )
+        ).all()
+
+    assert owned_relations == []
+    assert members_of == []
+
+
+def test_no_function_is_executable_by_public(app_engine: Engine) -> None:
+    """EXECUTE is granted to named roles only: PostgreSQL grants it to PUBLIC by default, and
+    every function of the schema must have had that taken away."""
+    with app_engine.connect() as connection:
+        public_can: Any = connection.execute(
+            text(
+                "SELECT count(*) FROM pg_proc p CROSS JOIN LATERAL aclexplode(p.proacl) a "
+                "WHERE p.pronamespace = 'public'::regnamespace AND a.grantee = 0"
+            )
+        ).scalar_one()
+    assert public_can == 0
 
 
 def test_context_functions_are_stable_invoker_with_a_fixed_search_path(
@@ -192,11 +319,12 @@ def test_context_functions_are_stable_invoker_with_a_fixed_search_path(
             text(
                 "SELECT p.proname, p.provolatile, p.prosecdef, p.proconfig, "
                 "pg_get_userbyid(p.proowner) FROM pg_proc p JOIN pg_namespace n "
-                "ON n.oid = p.pronamespace WHERE n.nspname = 'public' ORDER BY p.proname"
+                "ON n.oid = p.pronamespace WHERE n.nspname = 'public' AND NOT p.prosecdef "
+                "ORDER BY p.proname"
             )
         ).all()
 
-    assert [row[0] for row in rows] == ["app_org", "app_school"]
+    assert [row[0] for row in rows] == ["app_org", "app_school", "app_session_id", "app_user_id"]
     for _name, volatility, security_definer, config, owner in rows:
         assert volatility == "s"  # STABLE
         assert security_definer is False
@@ -204,19 +332,33 @@ def test_context_functions_are_stable_invoker_with_a_fixed_search_path(
         assert owner == "apm_owner"
 
 
-def test_there_is_no_system_mode_or_open_policy(admin_engine: Engine) -> None:
+# Policies whose condition is literally `true`: the ONE open read is the lookup of a login identity
+# (find_login_identity must find a user by e-mail with no tenant yet), limited to apm_definer, four
+# columns, and reachable only through that function.
+OPEN_POLICIES = {"users_definer_select"}
+
+
+def test_there_is_no_system_mode_and_the_only_open_policy_is_the_login_lookup(
+    admin_engine: Engine,
+) -> None:
     """No bypass switch: no policy is open to everyone and none mentions a system flag."""
     with admin_engine.connect() as connection:
         policies = connection.execute(
-            text("SELECT policyname, coalesce(qual, ''), coalesce(with_check, '') FROM pg_policies")
+            text(
+                "SELECT policyname, coalesce(qual, ''), coalesce(with_check, ''), roles::text[] "
+                "FROM pg_policies"
+            )
         ).all()
 
-    assert len(policies) == 11
-    for name, qual, check in policies:
-        assert qual.strip().lower() != "true", name
-        assert check.strip().lower() != "true", name
+    assert len(policies) == 30
+    open_ones = set()
+    for name, qual, check, roles in policies:
+        if qual.strip().lower() == "true" or check.strip().lower() == "true":
+            open_ones.add(name)
+            assert roles == ["apm_definer"], name  # never open to PUBLIC or to the application
         assert "sistema" not in qual + check, name
         assert "system" not in qual + check, name
+    assert open_ones == OPEN_POLICIES
 
 
 # --- the grants of apm_app, exactly (a grant added by mistake or by tampering fails here) ---------
@@ -235,29 +377,67 @@ ALL_COLUMNS = {
         "updated_at",
     },
     "users": {"id", "email", "full_name", "password_hash", "is_active", "created_at", "updated_at"},
+    "sessions": {
+        "id",
+        "user_id",
+        "membership_id",
+        "created_at",
+        "last_seen_at",
+        "expires_at",
+        "revoked_at",
+        "revoked_reason",
+        "ip",
+        "user_agent_hash",
+    },
+    "login_attempts": {"id", "kind", "subject_hmac", "ip_hmac", "succeeded", "attempted_at"},
+    "invitations": {
+        "id",
+        "organization_id",
+        "school_id",
+        "email",
+        "role",
+        "token_hash",
+        "invited_by_user_id",
+        "expires_at",
+        "accepted_at",
+        "accepted_user_id",
+        "revoked_at",
+        "created_at",
+        "updated_at",
+    },
 }
 # Effective privilege (table-level or column-level) per column, per privilege, for apm_app.
 SELECTABLE = {
     "organizations": ALL_COLUMNS["organizations"],
     "schools": ALL_COLUMNS["schools"],
     "memberships": ALL_COLUMNS["memberships"],
-    # Everything but password_hash, until authentication exists.
+    # Everything but password_hash: only the SECURITY DEFINER lookup reads it.
     "users": ALL_COLUMNS["users"] - {"password_hash"},
+    "sessions": ALL_COLUMNS["sessions"],
+    "login_attempts": ALL_COLUMNS["login_attempts"],
+    # Everything but token_hash: an invitation is found by its hash, never listed.
+    "invitations": ALL_COLUMNS["invitations"] - {"token_hash"},
 }
 INSERTABLE = {
     "organizations": set(),
     "schools": ALL_COLUMNS["schools"],
     "memberships": set(),
     "users": set(),
+    "sessions": ALL_COLUMNS["sessions"],
+    "login_attempts": ALL_COLUMNS["login_attempts"],
+    "invitations": ALL_COLUMNS["invitations"],
 }
 # Never id, organization_id, school_id, user_id or created_at (M1): only what changes business data.
 UPDATABLE = {
     "organizations": {"name", "updated_at"},
     "schools": {"name", "updated_at"},
     "memberships": {"role", "status", "updated_at"},
-    "users": set(),
+    "users": {"password_hash", "updated_at"},  # the user's own row, by policy
+    "sessions": {"last_seen_at", "revoked_at", "revoked_reason"},
+    "login_attempts": set(),
+    "invitations": {"revoked_at", "updated_at"},
 }
-DELETABLE = {"memberships"}
+DELETABLE = {"memberships", "login_attempts"}
 
 
 def _column_privilege(admin_engine: Engine, privilege: str) -> dict[str, set[str]]:
@@ -299,4 +479,10 @@ def test_application_role_table_privileges_are_exactly_these(admin_engine: Engin
         ("schools", "INSERT"),
         ("memberships", "SELECT"),
         ("memberships", "DELETE"),
+        ("sessions", "SELECT"),
+        ("sessions", "INSERT"),
+        ("login_attempts", "SELECT"),
+        ("login_attempts", "INSERT"),
+        ("login_attempts", "DELETE"),
+        ("invitations", "INSERT"),
     }
