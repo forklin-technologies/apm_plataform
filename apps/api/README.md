@@ -148,7 +148,7 @@ apps/api/
     db/              Base (naming convention), engine/session factory, get_db, tenant context helper
     routers/         HTTP layer; everything mounted under /api (v1/: auth and invitations; deps.py: tenant context of the session)
     auth/            sessions, passwords, CSRF, rate limit, permissions, the three definer functions' callers (docs/auth.md)
-    models/          Organization, School, User, Membership, Session, LoginAttempt, Invitation
+    models/          Organization, School, User, Membership, UserSession, LoginAttempt, Invitation
     schemas/         Pydantic request/response models
     services/        business rules (empty for now)
     repositories/    data access (empty for now)
