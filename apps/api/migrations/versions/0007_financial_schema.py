@@ -785,6 +785,15 @@ def _create_audit_and_closings() -> None:
             entries_hash text NOT NULL,
             -- The breakdown by report group and category, computed by the database.
             breakdown jsonb NOT NULL,
+            -- Reconciliation with the bank. bank_balance_reported_cents is the final balance
+            -- according to the BANK statement, given (or imported) when the month is closed, and
+            -- never changed afterwards. The difference to the cash balance of the platform is
+            -- computed by the database: positive when the bank holds MORE than the platform. Neither
+            -- column is covered by the hash or by verify_closing, and a difference does not stop the
+            -- closing: it is recorded and shown (the monthly report prints it).
+            bank_balance_reported_cents bigint,
+            bank_difference_cents bigint GENERATED ALWAYS AS
+                (bank_balance_reported_cents - closing_balance_cents) STORED,
             closed_by_user_id uuid NOT NULL,
             closed_at timestamptz NOT NULL DEFAULT now(),
             report_ref text,
@@ -813,6 +822,9 @@ def _create_audit_and_closings() -> None:
                 AND pending_reimbursements_cents >= 0 AND entries_count >= 0),
             CONSTRAINT ck_monthly_closings_entries_hash_format CHECK (entries_hash ~ '{HEX64}'),
             CONSTRAINT ck_monthly_closings_breakdown_object CHECK (jsonb_typeof(breakdown) = 'object'),
+            CONSTRAINT ck_monthly_closings_bank_balance_range CHECK (
+                bank_balance_reported_cents IS NULL
+                OR bank_balance_reported_cents BETWEEN -1000000000000 AND 1000000000000),
             CONSTRAINT ck_monthly_closings_report_ref_length
                 CHECK (report_ref IS NULL OR length(report_ref) BETWEEN 1 AND 500),
             CONSTRAINT ck_monthly_closings_reopen_complete CHECK (
@@ -2110,6 +2122,7 @@ AUDIT = {
         "other_in_cents,refunds_in_cents,total_in_cents,expenses_out_cents,"
         "reimbursements_out_cents,total_out_cents,closing_balance_cents,"
         "pending_reimbursements_cents,closing_after_pending_cents,entries_count,entries_hash,"
+        "bank_balance_reported_cents,bank_difference_cents,"
         "closed_by_user_id,closed_at,reopened_at,reopened_by_user_id",
         "report_ref,reopen_reason",
         "id",
@@ -2425,6 +2438,7 @@ def _create_triggers() -> None:
             "entries_count",
             "entries_hash",
             "breakdown",
+            "bank_balance_reported_cents",
             "closed_by_user_id",
             "closed_at",
         ),
@@ -2694,7 +2708,13 @@ GRANTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
         (),
     ),
     "monthly_closings": (
-        ("organization_id", "school_id", "period_start", "closed_by_user_id"),
+        (
+            "organization_id",
+            "school_id",
+            "period_start",
+            "closed_by_user_id",
+            "bank_balance_reported_cents",
+        ),
         ("reopened_by_user_id", "reopen_reason", "report_ref"),
     ),
 }
