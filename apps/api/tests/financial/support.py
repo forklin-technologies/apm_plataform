@@ -272,6 +272,48 @@ def add_cash_contribution(
     return tx
 
 
+def add_direct_pix(
+    conn: Connection,
+    fresh: Fresh,
+    amount: int,
+    *,
+    settled_at: datetime | None = None,
+    reference: str | None = None,
+    guardian: str | None = None,
+    category: uuid.UUID | None = None,
+) -> uuid.UUID:
+    """A Pix paid straight to the key of the APM, outside the platform's charge, registered by the
+    treasury. With settled_at it is born PAID; without, it is born REVIEW_REQUIRED (a credit seen on
+    the bank statement and not yet confirmed). `reference` is the end-to-end id of the Pix."""
+    tx = add_transaction(
+        conn,
+        fresh,
+        kind="CONTRIBUTION",
+        direction="IN",
+        amount=amount,
+        status="PAID" if settled_at is not None else "REVIEW_REQUIRED",
+        category=category or fresh.cat_in,
+        created_by=fresh.treasurer,
+        occurred_at=settled_at,
+        settled_at=settled_at,
+    )
+    conn.execute(
+        text(
+            "INSERT INTO contributions (transaction_id, organization_id, school_id, method, "
+            "external_reference, guardian_name) "
+            "VALUES (:tx, :org, :school, 'PIX_DIRECT', :ref, :guardian)"
+        ),
+        {
+            "tx": tx,
+            "org": fresh.org,
+            "school": fresh.school,
+            "ref": reference or end_to_end_id(),
+            "guardian": guardian,
+        },
+    )
+    return tx
+
+
 def add_pix_contribution(
     conn: Connection, fresh: Fresh, amount: int, *, paid_at: datetime | None = None
 ) -> tuple[uuid.UUID, uuid.UUID]:

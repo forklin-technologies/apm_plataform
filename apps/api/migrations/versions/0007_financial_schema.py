@@ -41,6 +41,7 @@ TIMESTAMPS = """
 # for each other.
 LOCK_REFERENCE = 7001
 LOCK_PERIOD = 7002
+LOCK_PIX_REFERENCE = 7003
 
 
 def _scope(org_column: str, school_column: str) -> str:
@@ -302,9 +303,17 @@ def _create_details() -> None:
             organization_id uuid NOT NULL,
             school_id uuid NOT NULL,
             kind text NOT NULL DEFAULT 'CONTRIBUTION',
-            -- PIX through the provider; CASH, TRANSFER and OTHER are manual entries of the treasury
-            -- (donations, other income and revenue of the APM are contributions with their own category).
+            -- PIX through the provider's charge; PIX_DIRECT is a Pix paid straight to the key of the
+            -- APM, outside the platform's charge, seen on the bank statement and registered or
+            -- reconciled by the management; CASH, TRANSFER and OTHER are manual entries of the
+            -- treasury (donations, other income and revenue of the APM are contributions with their
+            -- own category).
             method text NOT NULL,
+            -- The end-to-end id of a PIX_DIRECT Pix (and only of it): what makes the same Pix
+            -- impossible to register twice. It is also kept distinct from every pix_charges
+            -- end_to_end_id of the school by the triggers contributions_20_insert and
+            -- pix_charges_20_end_to_end_id (a Pix is never two contributions).
+            external_reference text,
             -- Identification of the contributor: only what the school enables, never public, and it
             -- can only be erased (non-null to null), never rewritten.
             guardian_name text,
@@ -323,8 +332,15 @@ def _create_details() -> None:
             -- Global on purpose: the token is a 128-bit secret stored only as a hash, so a clash
             -- reveals nothing, and resolve_receipt (ADR-016) looks it up without a tenant.
             CONSTRAINT uq_contributions_receipt_token_hash UNIQUE (receipt_token_hash),
+            -- Per school, never global (the M1 lesson: a global UNIQUE would answer for other tenants).
+            CONSTRAINT uq_contributions_school_id_external_reference
+                UNIQUE (school_id, external_reference),
             CONSTRAINT ck_contributions_method_valid
-                CHECK (method IN ('PIX', 'CASH', 'TRANSFER', 'OTHER')),
+                CHECK (method IN ('PIX', 'PIX_DIRECT', 'CASH', 'TRANSFER', 'OTHER')),
+            CONSTRAINT ck_contributions_external_reference_format
+                CHECK (external_reference IS NULL OR external_reference ~ '^E[A-Za-z0-9]{{31}}$'),
+            CONSTRAINT ck_contributions_external_reference_iff_pix_direct
+                CHECK ((method = 'PIX_DIRECT') = (external_reference IS NOT NULL)),
             CONSTRAINT ck_contributions_guardian_name_length
                 CHECK (guardian_name IS NULL OR length(btrim(guardian_name)) BETWEEN 1 AND 120),
             CONSTRAINT ck_contributions_student_name_length
@@ -962,11 +978,14 @@ END
 $body$
 """
 
+# A contribution may be born REVIEW_REQUIRED, but only a PIX_DIRECT one (a credit seen on the bank
+# statement and not yet confirmed by the management): the method lives in the detail row, which
+# does not exist yet, so contributions_20_insert makes that rule when the detail row arrives.
 FUNCTIONS["ft_check_initial"] = f"""
 CREATE FUNCTION public.ft_check_initial() RETURNS trigger {HEADER} AS $body$
 BEGIN
     IF NOT (NEW.kind || ':' || NEW.status) = ANY (ARRAY[
-        'CONTRIBUTION:PENDING_PAYMENT', 'CONTRIBUTION:PAID',
+        'CONTRIBUTION:PENDING_PAYMENT', 'CONTRIBUTION:PAID', 'CONTRIBUTION:REVIEW_REQUIRED',
         'EXPENSE:DRAFT', 'EXPENSE:SUBMITTED',
         'REIMBURSEMENT:PENDING', 'REFUND:REQUESTED'
     ]) THEN
@@ -1001,6 +1020,7 @@ DECLARE
     ];
     editable boolean := OLD.kind = 'EXPENSE' AND OLD.status IN ('DRAFT', 'CORRECTION_REQUESTED');
     reason text;
+    via text;
     received bigint;
 BEGIN
     IF NEW.status <> OLD.status
@@ -1014,13 +1034,19 @@ BEGIN
     END IF;
     IF OLD.kind = 'CONTRIBUTION' AND OLD.status = 'REVIEW_REQUIRED'
        AND NEW.status IN ('PAID', 'CANCELLED') THEN
-        SELECT c.review_decision_reason INTO reason
+        SELECT c.review_decision_reason, c.method INTO reason, via
         FROM public.contributions c WHERE c.transaction_id = NEW.id;
         IF length(btrim(coalesce(reason, ''))) < 3 THEN
             RAISE EXCEPTION 'a review decision records its reason (written first)'
                 USING ERRCODE = 'check_violation';
         END IF;
-        IF NEW.status = 'PAID' THEN
+        IF via = 'PIX_DIRECT' THEN
+            -- A direct Pix has no charge to compare with: the amount is the one registered.
+            IF NEW.amount_cents <> OLD.amount_cents THEN
+                RAISE EXCEPTION 'deciding a direct Pix review does not change the amount'
+                    USING ERRCODE = 'restrict_violation';
+            END IF;
+        ELSIF NEW.status = 'PAID' THEN
             SELECT p.received_amount_cents INTO received
             FROM public.pix_charges p WHERE p.transaction_id = NEW.id AND p.status = 'REVIEW_REQUIRED';
             IF received IS NULL OR NEW.amount_cents <> received THEN
@@ -1142,8 +1168,18 @@ BEGIN
             RAISE EXCEPTION 'contribution % has no contributions row', r.id
                 USING ERRCODE = 'check_violation';
         END IF;
-        IF v_contribution.method <> 'PIX' AND (r.status <> 'PAID' OR r.created_by_user_id IS NULL) THEN
+        IF v_contribution.method IN ('CASH', 'TRANSFER', 'OTHER')
+           AND (r.status <> 'PAID' OR r.created_by_user_id IS NULL) THEN
             RAISE EXCEPTION 'a manual contribution (cash, transfer, other) is born PAID and records who entered it'
+                USING ERRCODE = 'check_violation';
+        END IF;
+        -- A direct Pix is registered by the management (so it always records who), is never
+        -- PENDING_PAYMENT or EXPIRED (there is no charge to wait for) and, with no charge, is
+        -- not compared with one.
+        IF v_contribution.method = 'PIX_DIRECT' AND (
+            r.created_by_user_id IS NULL OR r.status NOT IN ('PAID', 'REVIEW_REQUIRED', 'CANCELLED')
+        ) THEN
+            RAISE EXCEPTION 'a direct Pix contribution records who registered it and is PAID, in review or cancelled'
                 USING ERRCODE = 'check_violation';
         END IF;
         IF v_contribution.method = 'PIX' AND r.status = 'PAID' AND NOT EXISTS (
@@ -1290,6 +1326,66 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'a review reason is written only while the contribution is REVIEW_REQUIRED'
             USING ERRCODE = 'restrict_violation';
+    END IF;
+    RETURN NEW;
+END
+$body$
+"""
+
+# A Pix is never two contributions: the end-to-end id of a PIX_DIRECT contribution is distinct
+# from every end-to-end id of the charges of the school (the mirror of pix_charges_check_end_to_end_id).
+# The same advisory lock in both triggers serialises the two inserters of a school, so neither
+# misses the row of the other; the error is a unique_violation, as the UNIQUE index would raise.
+# And a PIX_DIRECT row is born PAID or REVIEW_REQUIRED only; REVIEW_REQUIRED is for it alone.
+FUNCTIONS["contributions_check_insert"] = f"""
+CREATE FUNCTION public.contributions_check_insert() RETURNS trigger {HEADER} AS $body$
+DECLARE
+    current_status text;
+BEGIN
+    IF NEW.external_reference IS NOT NULL THEN
+        PERFORM pg_advisory_xact_lock({LOCK_PIX_REFERENCE}, hashtext(NEW.school_id::text));
+        IF EXISTS (
+            SELECT 1 FROM public.pix_charges p
+            WHERE p.school_id = NEW.school_id AND p.end_to_end_id = NEW.external_reference
+        ) THEN
+            RAISE EXCEPTION 'this Pix is already the end-to-end id of a charge of the school'
+                USING ERRCODE = 'unique_violation';
+        END IF;
+    END IF;
+    SELECT f.status INTO current_status
+    FROM public.financial_transactions f
+    WHERE f.id = NEW.transaction_id AND f.organization_id = NEW.organization_id
+      AND f.school_id = NEW.school_id;
+    IF NOT FOUND THEN
+        RETURN NEW;  -- the composite foreign key refuses it, uniformly
+    END IF;
+    IF current_status = 'REVIEW_REQUIRED' AND NEW.method <> 'PIX_DIRECT' THEN
+        RAISE EXCEPTION 'only a direct Pix contribution can be born REVIEW_REQUIRED'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    IF NEW.method = 'PIX_DIRECT' AND current_status NOT IN ('PAID', 'REVIEW_REQUIRED') THEN
+        RAISE EXCEPTION 'a direct Pix contribution is born PAID or REVIEW_REQUIRED'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END
+$body$
+"""
+
+FUNCTIONS["pix_charges_check_end_to_end_id"] = f"""
+CREATE FUNCTION public.pix_charges_check_end_to_end_id() RETURNS trigger {HEADER} AS $body$
+BEGIN
+    IF NEW.end_to_end_id IS NULL
+       OR (TG_OP = 'UPDATE' AND NEW.end_to_end_id IS NOT DISTINCT FROM OLD.end_to_end_id) THEN
+        RETURN NEW;
+    END IF;
+    PERFORM pg_advisory_xact_lock({LOCK_PIX_REFERENCE}, hashtext(NEW.school_id::text));
+    IF EXISTS (
+        SELECT 1 FROM public.contributions c
+        WHERE c.school_id = NEW.school_id AND c.external_reference = NEW.end_to_end_id
+    ) THEN
+        RAISE EXCEPTION 'this Pix is already registered as a direct Pix contribution of the school'
+            USING ERRCODE = 'unique_violation';
     END IF;
     RETURN NEW;
 END
@@ -1804,7 +1900,9 @@ FUNCTION_ORDER = (
     "expenses_edit_only_when_editable",
     "expense_attachments_check_state",
     "contributions_check_review",
+    "contributions_check_insert",
     "pix_charges_check_contribution",
+    "pix_charges_check_end_to_end_id",
     "school_settings_lock_timezone",
     "schools_create_settings",
     "statement_entries",
@@ -1883,7 +1981,7 @@ AUDIT = {
     "contributions": (
         "transaction_id,method,receipt_expires_at",
         "guardian_name,student_name,class_name,contributor_email,contributor_phone,"
-        "receipt_token_hash,review_decision_reason",
+        "receipt_token_hash,review_decision_reason,external_reference",
         "transaction_id",
         "tx",
     ),
@@ -2032,6 +2130,7 @@ def _create_triggers() -> None:
             "school_id",
             "kind",
             "method",
+            "external_reference",
             "receipt_token_hash",
             "receipt_expires_at",
             "created_at",
@@ -2059,6 +2158,12 @@ def _create_triggers() -> None:
             "contributions_15_review",
             "BEFORE UPDATE",
             "contributions_check_review",
+        ),
+        _trigger(
+            "contributions",
+            "contributions_20_insert",
+            "BEFORE INSERT",
+            "contributions_check_insert",
         ),
         immutable(
             "expenses",
@@ -2199,6 +2304,12 @@ def _create_triggers() -> None:
             "BEFORE INSERT",
             "pix_charges_check_contribution",
         ),
+        _trigger(
+            "pix_charges",
+            "pix_charges_20_end_to_end_id",
+            "BEFORE INSERT OR UPDATE OF end_to_end_id",
+            "pix_charges_check_end_to_end_id",
+        ),
         immutable(
             "webhook_events",
             "id",
@@ -2333,6 +2444,7 @@ GRANTS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
             "organization_id",
             "school_id",
             "method",
+            "external_reference",
             "guardian_name",
             "student_name",
             "class_name",
