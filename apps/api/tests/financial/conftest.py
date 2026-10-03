@@ -92,7 +92,7 @@ def _bare_transaction(
     """A ledger row without its detail row. Triggers are off for it (replica mode) so that the
     reference code is explicit and the deferred consistency check does not apply."""
     conn.execute(text("SET LOCAL session_replication_role = replica"))
-    row = conn.execute(
+    row: uuid.UUID = conn.execute(
         text(
             "INSERT INTO financial_transactions (organization_id, school_id, kind, direction, "
             "amount_cents, status, category_id, origin_type, parent_transaction_id, parent_kind, "
@@ -114,7 +114,7 @@ def _bare_transaction(
         },
     ).scalar_one()
     conn.execute(text("RESET session_replication_role"))
-    return row  # type: ignore[no-any-return]
+    return row
 
 
 @pytest.fixture(scope="session")

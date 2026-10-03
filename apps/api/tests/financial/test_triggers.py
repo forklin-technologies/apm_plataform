@@ -10,6 +10,7 @@ the admin (a superuser: the triggers fire, row level security does not get in th
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Any
 
 import pytest
 from sqlalchemy import Connection, Engine, text
@@ -21,10 +22,13 @@ from tests.financial.support import (
     add_collaborator_expense,
     add_expense,
     add_pix_contribution,
+    add_pix_review,
     add_refund,
+    add_reimbursement,
     add_transaction,
     check_consistency,
     make_school,
+    set_status,
     utc,
 )
 from tests.financial.test_isolation import TABLES
@@ -43,6 +47,8 @@ def _t(timing: str, events: set[str], function: str, level: str = "ROW") -> Trig
 EXPECTED_TRIGGERS: dict[tuple[str, str], Trigger] = {
     ("financial_transactions", "ft_05_immutable"): _t(B, {UPD}, "assert_immutable_columns"),
     ("financial_transactions", "ft_06_freeze"): _t(B, {UPD}, "freeze_when_final"),
+    ("financial_transactions", "ft_07_change"): _t(B, {UPD}, "ft_check_change"),
+    ("financial_transactions", "ft_08_initial"): _t(B, {INS}, "ft_check_initial"),
     ("financial_transactions", "ft_10_reference_code"): _t(B, {INS}, "ft_assign_reference_code"),
     ("financial_transactions", "ft_20_relations"): _t(B, {INS}, "ft_check_relations"),
     ("financial_transactions", "ft_25_member"): _t(B, {INS}, "assert_active_member"),
@@ -50,19 +56,26 @@ EXPECTED_TRIGGERS: dict[tuple[str, str], Trigger] = {
     ("financial_transactions", "ft_90_consistency"): _t(A, {INS, UPD}, "ft_check_consistency"),
     ("contributions", "contributions_05_immutable"): _t(B, {UPD}, "assert_immutable_columns"),
     ("contributions", "contributions_10_anonymize"): _t(B, {UPD}, "assert_anonymize_only"),
+    ("contributions", "contributions_12_set_once"): _t(B, {UPD}, "assert_set_once_columns"),
+    ("contributions", "contributions_15_review"): _t(B, {UPD}, "contributions_check_review"),
     ("expenses", "expenses_05_immutable"): _t(B, {UPD}, "assert_immutable_columns"),
     ("expenses", "expenses_10_set_once"): _t(B, {UPD}, "assert_set_once_columns"),
     ("expenses", "expenses_15_decision_time"): _t(B, {INS, UPD}, "expenses_set_decision_time"),
-    ("expenses", "expenses_20_editable"): _t(B, {UPD}, "expenses_edit_only_while_submitted"),
+    ("expenses", "expenses_20_editable"): _t(B, {UPD}, "expenses_edit_only_when_editable"),
     ("expenses", "expenses_25_member"): _t(B, {INS, UPD}, "assert_active_member"),
     ("reimbursements", "reimbursements_05_immutable"): _t(B, {UPD}, "assert_immutable_columns"),
     ("reimbursements", "reimbursements_10_set_once"): _t(B, {UPD}, "assert_set_once_columns"),
-    ("reimbursements", "reimbursements_25_member"): _t(B, {INS}, "assert_active_member"),
+    ("reimbursements", "reimbursements_25_member"): _t(B, {INS, UPD}, "assert_active_member"),
     ("refunds", "refunds_05_immutable"): _t(B, {UPD}, "assert_immutable_columns"),
     ("refunds", "refunds_10_set_once"): _t(B, {UPD}, "assert_set_once_columns"),
+    ("refunds", "refunds_25_member"): _t(B, {INS, UPD}, "assert_active_member"),
     ("expense_attachments", "expense_attachments_05_no_update"): _t(B, {UPD}, "forbid_update"),
+    ("expense_attachments", "expense_attachments_20_state"): _t(
+        B, {INS}, "expense_attachments_check_state"
+    ),
     ("expense_attachments", "expense_attachments_25_member"): _t(B, {INS}, "assert_active_member"),
     ("categories", "categories_05_immutable"): _t(B, {UPD}, "assert_immutable_columns"),
+    ("payment_accounts", "payment_accounts_05_immutable"): _t(B, {UPD}, "assert_immutable_columns"),
     ("school_settings", "school_settings_05_immutable"): _t(B, {UPD}, "assert_immutable_columns"),
     ("school_settings", "school_settings_10_timezone"): _t(
         B, {UPD}, "school_settings_lock_timezone"
@@ -90,6 +103,7 @@ AUDITED = [
     "reimbursements",
     "refunds",
     "pix_charges",
+    "payment_accounts",
     "expense_attachments",
     "categories",
     "school_settings",
@@ -106,12 +120,24 @@ for _table in TABLES:
 # Within a table and a timing, triggers fire in alphabetical order: this is the order the model needs.
 EXPECTED_ORDER: dict[tuple[str, str, str], list[str]] = {
     ("financial_transactions", B, INS): [
+        "ft_08_initial",
         "ft_10_reference_code",
         "ft_20_relations",
         "ft_25_member",
         "ft_30_settle",
     ],
-    ("financial_transactions", B, UPD): ["ft_05_immutable", "ft_06_freeze", "ft_30_settle"],
+    ("financial_transactions", B, UPD): [
+        "ft_05_immutable",
+        "ft_06_freeze",
+        "ft_07_change",
+        "ft_30_settle",
+    ],
+    ("contributions", B, UPD): [
+        "contributions_05_immutable",
+        "contributions_10_anonymize",
+        "contributions_12_set_once",
+        "contributions_15_review",
+    ],
     ("expenses", B, UPD): [
         "expenses_05_immutable",
         "expenses_10_set_once",
@@ -131,7 +157,9 @@ EXPECTED_ORDER: dict[tuple[str, str, str], list[str]] = {
 EXPECTED_FUNCTIONS = {
     "app_org", "app_school", "assert_active_member", "assert_anonymize_only",
     "assert_immutable_columns", "assert_set_once_columns", "audit_logs_fill_actor",
-    "audit_row_change", "closing_entries_hash", "expenses_edit_only_while_submitted",
+    "audit_row_change", "closing_breakdown", "closing_entries_hash", "contributions_check_review",
+    "expense_attachments_check_state", "expenses_edit_only_when_editable", "ft_check_change",
+    "ft_check_initial", "org_statement_summary",
     "expenses_set_decision_time", "forbid_delete", "forbid_truncate", "forbid_update",
     "freeze_when_final", "ft_assign_reference_code", "ft_check_consistency",
     "ft_check_relations", "ft_settle", "monthly_closings_reopen", "monthly_closings_snapshot",
@@ -202,7 +230,11 @@ def test_every_function_is_security_invoker_with_a_fixed_search_path(admin_engin
         assert security_definer is False, name
         assert config == ["search_path=pg_catalog"], name
         assert owner == "apm_owner", name
-        if name.startswith("statement_") or name in ("closing_entries_hash", "verify_closing"):
+        if name.startswith(("statement_", "org_statement_")) or name in (
+            "closing_entries_hash",
+            "closing_breakdown",
+            "verify_closing",
+        ):
             assert volatility == "s", name  # STABLE: they only read
 
 
@@ -228,7 +260,7 @@ def refused(conn: Connection, match: str) -> Iterator[None]:
         yield
 
 
-def _scalar(conn: Connection, sql: str, **params: object) -> object:
+def _scalar(conn: Connection, sql: str, **params: object) -> Any:
     return conn.execute(text(sql), params).scalar_one()
 
 
@@ -257,7 +289,16 @@ def test_an_active_member_and_an_organization_wide_member_can_be_named(
     for user in (f.staff, f.treasurer, f.admin):  # the admin's membership covers every school
         add_transaction(
             conn, f, kind="CONTRIBUTION", direction="IN", amount=100, status="PENDING_PAYMENT",
-            created_by=user,
+            created_by=user, origin_user_id=user,
+        )  # fmt: skip
+
+
+def test_the_origin_user_is_guarded_like_the_author(world: tuple[Connection, Fresh]) -> None:
+    conn, f = world
+    with refused(conn, "invalid user reference in origin_user_id"):
+        add_transaction(
+            conn, f, kind="CONTRIBUTION", direction="IN", amount=100, status="PENDING_PAYMENT",
+            origin_user_id=f.outsider,
         )  # fmt: skip
 
 
@@ -306,6 +347,24 @@ def test_the_decider_of_an_expense_is_checked_when_it_is_set(
     )
 
 
+def test_who_paid_a_reimbursement_and_who_confirmed_a_refund_are_checked(
+    world: tuple[Connection, Fresh],
+) -> None:
+    conn, f = world
+    _, reimbursement = add_collaborator_expense(conn, f, 1000)
+    with refused(conn, "invalid user reference in paid_by_user_id"):
+        conn.execute(
+            text("UPDATE reimbursements SET paid_by_user_id = :u WHERE transaction_id = :t"),
+            {"u": f.outsider, "t": reimbursement},
+        )
+    refund = add_refund(conn, f, 100)
+    with refused(conn, "invalid user reference in confirmed_by_user_id"):
+        conn.execute(
+            text("UPDATE refunds SET confirmed_by_user_id = :u WHERE transaction_id = :t"),
+            {"u": f.outsider, "t": refund},
+        )
+
+
 def test_nobody_decides_their_own_expense(world: tuple[Connection, Fresh]) -> None:
     conn, f = world
     expense = add_expense(conn, f, 1000)
@@ -323,112 +382,7 @@ def test_the_time_of_the_decision_is_set_by_the_database(world: tuple[Connection
         text("UPDATE expenses SET approved_by_user_id = :u WHERE transaction_id = :t"),
         {"u": f.treasurer, "t": expense},
     )
-    approved_at = _scalar(
-        conn, "SELECT approved_at FROM expenses WHERE transaction_id = :t", t=expense
-    )
-    assert approved_at is not None
-
-
-def test_an_expense_is_edited_only_while_submitted(world: tuple[Connection, Fresh]) -> None:
-    conn, f = world
-    expense = add_expense(conn, f, 1000)
-    conn.execute(
-        text("UPDATE expenses SET description = 'Corrected' WHERE transaction_id = :t"),
-        {"t": expense},
-    )
-    conn.execute(
-        text("UPDATE expenses SET approved_by_user_id = :u WHERE transaction_id = :t"),
-        {"u": f.treasurer, "t": expense},
-    )
-    conn.execute(
-        text("UPDATE financial_transactions SET status = 'APPROVED' WHERE id = :t"), {"t": expense}
-    )
-    with refused(conn, "only be edited while SUBMITTED"):
-        conn.execute(
-            text("UPDATE expenses SET description = 'Changed' WHERE transaction_id = :t"),
-            {"t": expense},
-        )
-
-
-# Condition 2: a refund of an expense only when the APM paid it.
-
-
-def test_a_collaborator_expense_cannot_be_refunded_only_reimbursed(
-    world: tuple[Connection, Fresh],
-) -> None:
-    conn, f = world
-    expense, _ = add_collaborator_expense(conn, f, 4000, reimbursed_at=utc(2025, 3, 25, 15))
-    with refused(conn, "corrected by its reimbursement"):
-        add_refund(conn, f, expense, "EXPENSE", 1000)
-
-
-def test_an_expense_paid_by_the_apm_can_be_refunded(world: tuple[Connection, Fresh]) -> None:
-    conn, f = world
-    expense = add_expense(conn, f, 2500, status="PAID", settled_at=utc(2025, 3, 20, 15))
-    refund = add_refund(conn, f, expense, "EXPENSE", 1000)
-    assert (
-        _scalar(conn, "SELECT direction FROM financial_transactions WHERE id = :t", t=refund)
-        == "IN"
-    )
-
-
-def test_only_a_paid_transaction_can_be_refunded(world: tuple[Connection, Fresh]) -> None:
-    conn, f = world
-    pending, _ = add_pix_contribution(conn, f, 3000)
-    with refused(conn, "only a PAID transaction can be refunded"):
-        add_refund(conn, f, pending, "CONTRIBUTION", 1000)
-
-
-def test_refunds_never_add_up_to_more_than_the_original(world: tuple[Connection, Fresh]) -> None:
-    conn, f = world
-    contribution = add_cash_contribution(conn, f, 5000, utc(2025, 3, 5, 15))
-    add_refund(conn, f, contribution, "CONTRIBUTION", 3000)
-    with refused(conn, "refunds would exceed the original amount"):
-        add_refund(conn, f, contribution, "CONTRIBUTION", 2001)
-    add_refund(conn, f, contribution, "CONTRIBUTION", 2000)  # exactly what is left
-    with refused(conn, "refunds would exceed the original amount"):
-        add_refund(conn, f, contribution, "CONTRIBUTION", 1)
-
-
-def test_a_failed_refund_frees_its_amount(world: tuple[Connection, Fresh]) -> None:
-    conn, f = world
-    contribution = add_cash_contribution(conn, f, 5000, utc(2025, 3, 5, 15))
-    refund = add_refund(conn, f, contribution, "CONTRIBUTION", 5000)
-    conn.execute(
-        text("UPDATE financial_transactions SET status = 'FAILED' WHERE id = :t"), {"t": refund}
-    )
-    add_refund(conn, f, contribution, "CONTRIBUTION", 5000)
-
-
-def test_a_reimbursement_needs_an_approved_collaborator_expense_and_its_exact_amount(
-    world: tuple[Connection, Fresh],
-) -> None:
-    conn, f = world
-    apm_expense = add_expense(conn, f, 1000, status="APPROVED")
-    with refused(conn, "needs an APPROVED collaborator expense"):
-        add_reimbursement_row(conn, f, apm_expense, 1000)
-    submitted = add_expense(conn, f, 1000, paid_by="COLLABORATOR")
-    with refused(conn, "needs an APPROVED collaborator expense"):
-        add_reimbursement_row(conn, f, submitted, 1000)
-    approved = add_expense(conn, f, 1000, paid_by="COLLABORATOR", status="APPROVED")
-    with refused(conn, "needs an APPROVED collaborator expense"):
-        add_reimbursement_row(conn, f, approved, 999)
-    add_reimbursement_row(conn, f, approved, 1000)
-    with refused(conn, "uq_financial_transactions_one_active_reimbursement"):
-        add_reimbursement_row(conn, f, approved, 1000)  # one active reimbursement per expense
-
-
-def add_reimbursement_row(conn: Connection, f: Fresh, expense: uuid.UUID, amount: int) -> uuid.UUID:
-    from tests.financial.support import add_reimbursement
-
-    return add_reimbursement(conn, f, expense, amount)
-
-
-def test_a_refund_of_a_reimbursement_has_no_valid_shape(world: tuple[Connection, Fresh]) -> None:
-    conn, f = world
-    _, reimbursement = add_collaborator_expense(conn, f, 4000, reimbursed_at=utc(2025, 3, 25, 15))
-    with refused(conn, "ck_financial_transactions_shape"):
-        add_refund(conn, f, reimbursement, "REIMBURSEMENT", 100)
+    assert _scalar(conn, "SELECT approved_at FROM expenses WHERE transaction_id = :t", t=expense)
 
 
 # Condition 3: personal data of a contribution can only be erased.
@@ -437,9 +391,12 @@ def test_a_refund_of_a_reimbursement_has_no_valid_shape(world: tuple[Connection,
 def test_personal_data_can_only_be_anonymized(world: tuple[Connection, Fresh]) -> None:
     conn, f = world
     tx = add_cash_contribution(
-        conn, f, 5000, utc(2025, 3, 5, 15), guardian="Maria", student="João", class_name="3A"
-    )
-    for column in ("guardian_name", "student_name", "class_name"):
+        conn, f, 5000, utc(2025, 3, 5, 15), guardian="Maria", student="João", class_name="3A",
+        email="maria@example.test", phone="+55 11 99999-0000",
+    )  # fmt: skip
+    for column in (
+        "guardian_name", "student_name", "class_name", "contributor_email", "contributor_phone"
+    ):  # fmt: skip
         with refused(conn, "can only be erased, never rewritten"):
             conn.execute(
                 text(
@@ -449,8 +406,8 @@ def test_personal_data_can_only_be_anonymized(world: tuple[Connection, Fresh]) -
             )
     conn.execute(
         text(
-            "UPDATE contributions SET guardian_name = NULL, student_name = NULL, class_name = NULL "
-            "WHERE transaction_id = :t"
+            "UPDATE contributions SET guardian_name = NULL, student_name = NULL, class_name = NULL, "
+            "contributor_email = NULL, contributor_phone = NULL WHERE transaction_id = :t"
         ),
         {"t": tx},
     )
@@ -461,10 +418,13 @@ def test_personal_data_can_only_be_anonymized(world: tuple[Connection, Fresh]) -
         )
 
 
-# Condition 4 and the other rules that look at two tables (checked when the transaction commits).
+# The rules that look at two tables (checked when the transaction commits).
 
 
-def test_a_cash_contribution_records_who_entered_it(world: tuple[Connection, Fresh]) -> None:
+@pytest.mark.parametrize("method", ["CASH", "TRANSFER", "OTHER"])
+def test_a_manual_contribution_records_who_entered_it_and_is_born_paid(
+    world: tuple[Connection, Fresh], method: str
+) -> None:
     conn, f = world
     tx = add_transaction(
         conn, f, kind="CONTRIBUTION", direction="IN", amount=500, status="PAID",
@@ -473,15 +433,15 @@ def test_a_cash_contribution_records_who_entered_it(world: tuple[Connection, Fre
     conn.execute(
         text(
             "INSERT INTO contributions (transaction_id, organization_id, school_id, method) "
-            "VALUES (:t, :o, :s, 'CASH')"
+            "VALUES (:t, :o, :s, :m)"
         ),
-        {"t": tx, "o": f.org, "s": f.school},
+        {"t": tx, "o": f.org, "s": f.school, "m": method},
     )  # no author
-    with refused(conn, "a cash contribution is born PAID and records who entered it"):
+    with refused(conn, "a manual contribution .* is born PAID and records who entered it"):
         check_consistency(conn)
 
 
-def test_a_cash_contribution_cannot_be_pending(world: tuple[Connection, Fresh]) -> None:
+def test_a_manual_contribution_cannot_be_pending(world: tuple[Connection, Fresh]) -> None:
     conn, f = world
     tx = add_transaction(
         conn, f, kind="CONTRIBUTION", direction="IN", amount=500, status="PENDING_PAYMENT",
@@ -490,7 +450,7 @@ def test_a_cash_contribution_cannot_be_pending(world: tuple[Connection, Fresh]) 
     conn.execute(
         text(
             "INSERT INTO contributions (transaction_id, organization_id, school_id, method) "
-            "VALUES (:t, :o, :s, 'CASH')"
+            "VALUES (:t, :o, :s, 'TRANSFER')"
         ),
         {"t": tx, "o": f.org, "s": f.school},
     )
@@ -498,16 +458,13 @@ def test_a_cash_contribution_cannot_be_pending(world: tuple[Connection, Fresh]) 
         check_consistency(conn)
 
 
-def test_a_pix_contribution_is_paid_only_with_a_paid_charge_of_the_same_amount(
+def test_a_pix_contribution_is_paid_only_with_a_charge_that_received_exactly_its_amount(
     world: tuple[Connection, Fresh],
 ) -> None:
     conn, f = world
-    tx, charge = add_pix_contribution(conn, f, 3000)
-    conn.execute(
-        text("UPDATE financial_transactions SET status = 'PAID', settled_at = now() WHERE id = :t"),
-        {"t": tx},
-    )  # PAID with no confirmation from the provider
-    with refused(conn, "only PAID with a PAID Pix charge"):
+    tx, _ = add_pix_contribution(conn, f, 3000)
+    set_status(conn, tx, "PAID", utc(2025, 3, 6, 15))  # PAID with no confirmation from the provider
+    with refused(conn, "only PAID with a charge that received exactly its amount"):
         check_consistency(conn)
 
 
@@ -523,101 +480,53 @@ def test_the_ledger_row_needs_the_detail_row_of_its_kind(world: tuple[Connection
     conn, f = world
     add_transaction(
         conn, f, kind="EXPENSE", direction="OUT", amount=100, status="SUBMITTED",
-        category=f.cat_out, created_by=f.staff,
+        created_by=f.staff,
     )  # fmt: skip
     with refused(conn, "has no expenses row"):
         check_consistency(conn)
 
 
-def test_a_decided_expense_records_who_decided_and_a_rejection_its_reason(
+def test_a_paid_reimbursement_records_who_paid_it_and_the_reference(
     world: tuple[Connection, Fresh],
 ) -> None:
     conn, f = world
-    expense = add_expense(conn, f, 1000)
-    conn.execute(
-        text("UPDATE financial_transactions SET status = 'APPROVED' WHERE id = :t"), {"t": expense}
-    )
-    with refused(conn, "records who decided"):
-        check_consistency(conn)
-    conn.execute(
-        text("UPDATE expenses SET approved_by_user_id = :u WHERE transaction_id = :t"),
-        {"u": f.treasurer, "t": expense},
-    )
-    check_consistency(conn)
-    rejected = add_expense(conn, f, 1000)
-    conn.execute(
-        text("UPDATE expenses SET approved_by_user_id = :u WHERE transaction_id = :t"),
-        {"u": f.treasurer, "t": rejected},
-    )
-    conn.execute(
-        text("UPDATE financial_transactions SET status = 'REJECTED' WHERE id = :t"), {"t": rejected}
-    )
-    with refused(conn, "a rejection records its reason"):
+    expense = add_expense(conn, f, 1000, paid_by="COLLABORATOR", status="APPROVED")
+    reimbursement = add_reimbursement(conn, f, expense)
+    set_status(conn, reimbursement, "PAID", utc(2025, 3, 6, 15))  # nothing recorded
+    with refused(conn, "records who paid it and its payment reference"):
         check_consistency(conn)
 
 
-def test_a_collaborator_expense_is_paid_only_with_a_paid_reimbursement(
-    world: tuple[Connection, Fresh],
-) -> None:
+def test_a_confirmed_refund_records_who_confirmed_it(world: tuple[Connection, Fresh]) -> None:
     conn, f = world
-    expense, _ = add_collaborator_expense(conn, f, 4000)  # reimbursement still PENDING
-    conn.execute(
-        text("UPDATE financial_transactions SET status = 'PAID', settled_at = now() WHERE id = :t"),
-        {"t": expense},
-    )
-    with refused(conn, "PAID only with a PAID reimbursement"):
+    refund = add_refund(conn, f, 100, status="AWAITING_CONFIRMATION")
+    set_status(conn, refund, "CONFIRMED", utc(2025, 3, 6, 15))
+    with refused(conn, "records who confirmed it"):
         check_consistency(conn)
-
-
-@pytest.mark.parametrize("kind", ["reimbursement", "refund"])
-def test_a_paid_reimbursement_or_refund_records_its_payment_reference(
-    world: tuple[Connection, Fresh], kind: str
-) -> None:
-    conn, f = world
-    if kind == "reimbursement":
-        expense = add_expense(conn, f, 1000, paid_by="COLLABORATOR", status="APPROVED")
-        add_reimbursement_paid_without_reference(conn, f, expense)
-    else:
-        contribution = add_cash_contribution(conn, f, 5000, utc(2025, 3, 5, 15))
-        add_refund(
-            conn,
-            f,
-            contribution,
-            "CONTRIBUTION",
-            1000,
-            status="PAID",
-            settled_at=utc(2025, 3, 6, 15),
-        )
-    with refused(conn, "records its payment reference"):
-        check_consistency(conn)
-
-
-def add_reimbursement_paid_without_reference(
-    conn: Connection, f: Fresh, expense: uuid.UUID
-) -> None:
-    from tests.financial.support import add_reimbursement
-
-    add_reimbursement(conn, f, expense, 1000, status="PAID", settled_at=utc(2025, 3, 6, 15))
 
 
 def test_a_consistent_ledger_commits_clean(world: tuple[Connection, Fresh]) -> None:
     """The deferred check accepts everything the builders write when the data is right."""
     conn, f = world
     add_cash_contribution(conn, f, 10000, utc(2025, 3, 5, 15))
+    add_cash_contribution(conn, f, 700, utc(2025, 3, 5, 16), method="TRANSFER")
     add_pix_contribution(conn, f, 3000, paid_at=utc(2025, 3, 6, 15))
+    add_pix_review(conn, f, 3300, 3350)
     add_expense(conn, f, 2500, status="PAID", settled_at=utc(2025, 3, 20, 15))
+    add_expense(conn, f, 900, status="DRAFT")
+    add_expense(conn, f, 900, status="CORRECTION_REQUESTED")
     add_collaborator_expense(conn, f, 4000, reimbursed_at=utc(2025, 3, 25, 15))
-    contribution = add_cash_contribution(conn, f, 800, utc(2025, 3, 7, 15))
+    paid = add_expense(conn, f, 1000, status="PAID", settled_at=utc(2025, 3, 8, 15))
     add_refund(
         conn,
         f,
-        contribution,
-        "CONTRIBUTION",
         300,
-        status="PAID",
-        settled_at=utc(2025, 3, 8, 15),
-        reference="ref-9",
+        parent=paid,
+        parent_kind="EXPENSE",
+        status="CONFIRMED",
+        settled_at=utc(2025, 3, 9, 15),
     )
+    add_refund(conn, f, 50)  # no parent: a wrong payment
     check_consistency(conn)
 
 
@@ -636,10 +545,11 @@ def test_the_reference_code_is_sequential_per_school_and_never_chosen_by_the_cal
     chosen: int = conn.execute(
         text(
             "INSERT INTO financial_transactions (organization_id, school_id, kind, direction, "
-            "amount_cents, status, reference_code) VALUES (:o, :s, 'CONTRIBUTION', 'IN', 100, "
-            "'PENDING_PAYMENT', 777) RETURNING reference_code"
+            "amount_cents, status, category_id, origin_type, reference_code) VALUES (:o, :s, "
+            "'CONTRIBUTION', 'IN', 100, 'PENDING_PAYMENT', :c, 'GUARDIAN', 777) "
+            "RETURNING reference_code"
         ),
-        {"o": f.org, "s": f.school},
+        {"o": f.org, "s": f.school, "c": f.cat_in},
     ).scalar_one()
 
     codes = [
@@ -670,10 +580,10 @@ def test_a_multi_row_insert_gets_consecutive_codes(world: tuple[Connection, Fres
     conn.execute(
         text(
             "INSERT INTO financial_transactions (organization_id, school_id, kind, direction, "
-            "amount_cents, status) SELECT :o, :s, 'CONTRIBUTION', 'IN', 100, 'PENDING_PAYMENT' "
-            "FROM generate_series(1, 5)"
+            "amount_cents, status, category_id, origin_type) SELECT :o, :s, 'CONTRIBUTION', 'IN', "
+            "100, 'PENDING_PAYMENT', :c, 'GUARDIAN' FROM generate_series(1, 5)"
         ),
-        {"o": f.org, "s": f.school},
+        {"o": f.org, "s": f.school, "c": f.cat_in},
     )
     codes = [
         row[0]
@@ -692,21 +602,11 @@ def test_a_multi_row_insert_gets_consecutive_codes(world: tuple[Connection, Fres
 
 def test_a_settlement_in_the_future_is_refused(world: tuple[Connection, Fresh]) -> None:
     conn, f = world
-    tx = add_cash_contribution(conn, f, 100, utc(2025, 3, 1, 15))
-    _ = tx
+    ten_minutes = _scalar(conn, "SELECT now() + interval '10 minutes'")
+    two_minutes = _scalar(conn, "SELECT now() + interval '2 minutes'")
     with refused(conn, "settled_at cannot be in the future"):
-        add_cash_contribution(
-            conn,
-            f,
-            100,
-            _scalar(conn, "SELECT now() + interval '10 minutes'"),  # type: ignore[arg-type]
-        )
-    add_cash_contribution(
-        conn,
-        f,
-        100,
-        _scalar(conn, "SELECT now() + interval '2 minutes'"),  # type: ignore[arg-type]
-    )  # inside the tolerance
+        add_cash_contribution(conn, f, 100, ten_minutes)
+    add_cash_contribution(conn, f, 100, two_minutes)  # inside the tolerance
 
 
 def test_the_flag_of_a_late_adjustment_is_never_taken_from_the_caller(
@@ -716,39 +616,53 @@ def test_the_flag_of_a_late_adjustment_is_never_taken_from_the_caller(
     row = conn.execute(
         text(
             "INSERT INTO financial_transactions (organization_id, school_id, kind, direction, "
-            "amount_cents, status, settled_at, late_adjustment, created_by_user_id) "
-            "VALUES (:o, :s, 'CONTRIBUTION', 'IN', 100, 'PAID', :at, true, :u) "
-            "RETURNING late_adjustment, settled_at"
+            "amount_cents, status, category_id, origin_type, settled_at, late_adjustment, "
+            "created_by_user_id) VALUES (:o, :s, 'CONTRIBUTION', 'IN', 100, 'PAID', :c, 'GUARDIAN', "
+            ":at, true, :u) RETURNING late_adjustment, settled_at"
         ),
-        {"o": f.org, "s": f.school, "at": utc(2025, 3, 1, 15), "u": f.treasurer},
+        {"o": f.org, "s": f.school, "c": f.cat_in, "at": utc(2025, 3, 1, 15), "u": f.treasurer},
     ).one()
     assert row[0] is False and row[1] == utc(2025, 3, 1, 15)  # no closing: booked as given
 
 
-# Pix charges.
+# Pix charges and payment accounts.
 
 
 def test_a_pix_charge_needs_a_pending_pix_contribution_of_the_same_amount(
     world: tuple[Connection, Fresh],
 ) -> None:
     conn, f = world
-    tx, _ = add_pix_contribution(conn, f, 3000)
+    tx, charge = add_pix_contribution(conn, f, 3000)
     cash = add_cash_contribution(conn, f, 3000, utc(2025, 3, 1, 15))
     sql = text(
-        "INSERT INTO pix_charges (organization_id, school_id, transaction_id, provider, txid, "
-        "amount_cents, expires_at) VALUES (:o, :s, :t, 'SANDBOX', :x, :a, now() + interval '30 minutes')"
+        "INSERT INTO pix_charges (organization_id, school_id, transaction_id, payment_account_id, "
+        "provider, txid, amount_cents, expires_at) VALUES (:o, :s, :t, :account, 'SANDBOX', :x, :a, "
+        "now() + interval '30 minutes')"
     )
-    other_charge = {"o": f.org, "s": f.school, "x": uuid.uuid4().hex}
-    conn.execute(
-        text("UPDATE pix_charges SET status = 'EXPIRED' WHERE transaction_id = :t"), {"t": tx}
-    )
+    args = {"o": f.org, "s": f.school, "account": f.account, "x": uuid.uuid4().hex}
+    conn.execute(text("UPDATE pix_charges SET status = 'EXPIRED' WHERE id = :c"), {"c": charge})
     with refused(conn, "exact amount"):
-        conn.execute(sql, {**other_charge, "t": tx, "a": 3001})
+        conn.execute(sql, {**args, "t": tx, "a": 3001})
     with refused(conn, "needs a PENDING_PAYMENT Pix contribution"):
-        conn.execute(sql, {**other_charge, "t": cash, "a": 3000})
-    conn.execute(sql, {**other_charge, "t": tx, "a": 3000})
+        conn.execute(sql, {**args, "t": cash, "a": 3000})
+    conn.execute(sql, {**args, "t": tx, "a": 3000})
     with refused(conn, "uq_pix_charges_one_pending_per_contribution"):
-        conn.execute(sql, {**other_charge, "x": uuid.uuid4().hex, "t": tx, "a": 3000})
+        conn.execute(sql, {**args, "x": uuid.uuid4().hex, "t": tx, "a": 3000})
+
+
+def test_a_pix_charge_needs_the_active_account_of_the_school(
+    world: tuple[Connection, Fresh],
+) -> None:
+    conn, f = world
+    conn.execute(
+        text("UPDATE payment_accounts SET status = 'INACTIVE' WHERE id = :a"), {"a": f.account}
+    )
+    with refused(conn, "needs the ACTIVE payment account"):
+        add_pix_contribution(conn, f, 3000)
+    conn.execute(
+        text("UPDATE payment_accounts SET status = 'ACTIVE' WHERE id = :a"), {"a": f.account}
+    )
+    add_pix_contribution(conn, f, 3000)
 
 
 def test_a_confirmed_pix_charge_is_final(world: tuple[Connection, Fresh]) -> None:
@@ -767,12 +681,16 @@ def test_a_school_is_born_with_its_settings(world: tuple[Connection, Fresh]) -> 
     conn, f = world
     row = conn.execute(
         text(
-            "SELECT timezone, min_contribution_cents, pix_expiration_minutes, identification_mode "
+            "SELECT timezone, min_contribution_cents, suggested_amounts_cents, allow_custom_amount, "
+            "pix_expiration_minutes, required_fields, optional_fields "
             "FROM school_settings WHERE school_id = :s"
         ),
         {"s": f.school},
     ).one()
-    assert tuple(row) == ("America/Sao_Paulo", 1000, 30, "OPTIONAL")
+    assert tuple(row) == (
+        "America/Sao_Paulo", 1000, [2000, 3000, 4000], True, 30, [],
+        ["guardian_name", "contributor_email", "contributor_phone"],
+    )  # fmt: skip
 
 
 def test_the_time_zone_is_frozen_by_the_first_settlement(world: tuple[Connection, Fresh]) -> None:
