@@ -8,7 +8,7 @@ a forged cursor can skip or repeat rows of the caller's own view and nothing mor
 import base64
 import binascii
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -38,6 +38,37 @@ def encode_cursor(**position: Any) -> str:
     return base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
 
 
+BIGINT_MAX = 2**63 - 1
+# Every instant of the system is a recent one; a cursor outside this range was not made by us, and
+# keeping it narrow keeps a forged value away from the limits of the database types.
+FIRST_YEAR, LAST_YEAR = 1970, 2200
+MAX_OFFSET = timedelta(hours=15, minutes=59)
+
+
+def _instant(value: object) -> datetime:
+    """An ISO 8601 instant WITH an offset, within the range above."""
+    if not isinstance(value, str) or len(value) > 40:
+        raise ValueError("instant")
+    moment = datetime.fromisoformat(value)
+    offset = moment.utcoffset()
+    if offset is None or abs(offset) > MAX_OFFSET or not FIRST_YEAR <= moment.year <= LAST_YEAR:
+        raise ValueError("instant")
+    return moment
+
+
+def _integer(value: object) -> int:
+    """A whole number that fits a bigint (and is not a boolean, which is an int in Python)."""
+    if type(value) is not int or not 0 <= value <= BIGINT_MAX:
+        raise ValueError("integer")
+    return value
+
+
+def _uuid(value: object) -> UUID:
+    if not isinstance(value, str) or len(value) != 36:
+        raise ValueError("uuid")
+    return UUID(value)
+
+
 def decode_cursor(
     cursor: str,
     *,
@@ -46,25 +77,18 @@ def decode_cursor(
     uuids: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """The position a cursor holds: the keys in `instants` as aware datetimes, the keys in
-    `integers` as ints, the keys in `uuids` as UUIDs, and nothing else. Anything that does not fit
-    is a 422 `invalid_cursor`."""
+    `integers` as ints, the keys in `uuids` as UUIDs, and nothing else. Every field is checked for
+    its type AND its range, and anything that does not fit is a 422 `invalid_cursor`: a forged
+    cursor never reaches the database and never becomes a 500."""
     try:
         padded = cursor + "=" * (-len(cursor) % 4)
         data = json.loads(base64.b64decode(padded, altchars=b"-_", validate=True))
         if not isinstance(data, dict) or set(data) != {*instants, *integers, *uuids}:
-            raise ValueError
+            raise ValueError("shape")
         position: dict[str, Any] = {}
-        for key in instants:
-            moment = datetime.fromisoformat(data[key])
-            if moment.tzinfo is None:
-                raise ValueError
-            position[key] = moment
-        for key in integers:
-            if type(data[key]) is not int:
-                raise ValueError
-            position[key] = data[key]
-        for key in uuids:
-            position[key] = UUID(data[key])
-    except (ValueError, TypeError, binascii.Error):
+        position.update({key: _instant(data[key]) for key in instants})
+        position.update({key: _integer(data[key]) for key in integers})
+        position.update({key: _uuid(data[key]) for key in uuids})
+    except (ValueError, TypeError, OverflowError, RecursionError, binascii.Error):
         raise invalid_cursor() from None
     return position
