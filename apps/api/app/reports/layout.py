@@ -17,11 +17,13 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 from reportlab.platypus import (
+    CondPageBreak,
     Flowable,
     LongTable,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
+    Table,
     TableStyle,
 )
 
@@ -55,7 +57,6 @@ STYLES = {
         leading=15,
         spaceBefore=10,
         spaceAfter=4,
-        keepWithNext=1,
     ),
     "body": _style("body", fontSize=8.5, leading=11),
     "small": _style("small", fontSize=7.5, leading=9.5, textColor=MUTED),
@@ -155,7 +156,11 @@ def section(
 ) -> list[Flowable]:
     """A titled table that ends with its subtotal and its count. The heading stays with the first
     rows (it never ends a page alone)."""
-    pieces: list[Flowable] = [Paragraph(escape(printable(title)), STYLES["h2"])]
+    # A heading never ends a page: below 35 mm of room the section starts on the next one.
+    pieces: list[Flowable] = [
+        CondPageBreak(35 * mm),
+        Paragraph(escape(printable(title)), STYLES["h2"]),
+    ]
     if note:
         pieces.extend([para(note, "small"), Spacer(1, 3)])
     footer = [""] * len(columns)
@@ -165,6 +170,18 @@ def section(
         pieces.extend([para(empty_text, "body"), Spacer(1, 3)])
     pieces.append(data_table(columns, rows, footer=footer))
     return pieces
+
+
+def identification_table(rows: Sequence[tuple[str, str]]) -> Table:
+    """(label, value) lines under the title: who, which school, which period, when."""
+    table = Table(
+        [[para(label, "cell_bold"), para(value, "cell")] for label, value in rows],
+        colWidths=[CONTENT_WIDTH * 0.2, CONTENT_WIDTH * 0.8],
+    )
+    table.setStyle(
+        TableStyle([("TOPPADDING", (0, 0), (-1, -1), 1), ("BOTTOMPADDING", (0, 0), (-1, -1), 1)])
+    )
+    return table
 
 
 def key_value_table(

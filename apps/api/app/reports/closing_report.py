@@ -43,6 +43,7 @@ from app.reports.layout import (
     STYLES,
     Column,
     build_pdf,
+    identification_table,
     key_value_table,
     para,
     section,
@@ -343,21 +344,15 @@ def _summary_page(report: ClosingReport) -> list[Flowable]:
 
 def _identification(report: ClosingReport) -> Table:
     c = report.closing
-    rows = [
-        ("APM", report.organization_name),
-        ("Escola", report.school_name),
-        ("Período", month_name(c["period_start"])),
-        ("Gerado em", local_datetime(report.generated_at, report.timezone)),
-        ("Fuso horário", report.timezone),
-    ]
-    table = Table(
-        [[para(label, "cell_bold"), para(value, "cell")] for label, value in rows],
-        colWidths=[CONTENT_WIDTH * 0.2, CONTENT_WIDTH * 0.8],
+    return identification_table(
+        [
+            ("APM", report.organization_name),
+            ("Escola", report.school_name),
+            ("Período", month_name(c["period_start"])),
+            ("Gerado em", local_datetime(report.generated_at, report.timezone)),
+            ("Fuso horário", report.timezone),
+        ]
     )
-    table.setStyle(
-        TableStyle([("TOPPADDING", (0, 0), (-1, -1), 1), ("BOTTOMPADDING", (0, 0), (-1, -1), 1)])
-    )
-    return table
 
 
 def _count(lines: list[Line], *, kind: str | None = None, group: str | None = None) -> int:

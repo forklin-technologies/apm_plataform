@@ -1,6 +1,5 @@
 """GET /schools/{school_id}/statement, /statement/summary and /statement/pending."""
 
-from datetime import date
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -13,12 +12,13 @@ from app.statement.cursor import decode_cursor, encode_cursor
 from app.statement.deps import (
     InSchool,
     TenantDb,
+    month_of,
     not_found,
     permission_extra,
     require_any,
     responses_of,
 )
-from app.statement.periods import PERIOD_PATTERN, month_bounds
+from app.statement.periods import PERIOD_PATTERN
 from app.statement.schemas import (
     PendingEntryOut,
     PendingPage,
@@ -40,15 +40,6 @@ Limit = Annotated[int, Query(ge=1, le=100, description="Rows per page (1 to 100)
 Cursor = Annotated[str | None, Query(max_length=200, description="`next_cursor` of the last page.")]
 # The status vocabulary of the database; a value outside it simply matches nothing.
 StatusFilter = Annotated[str | None, Query(pattern=r"^[A-Z_]{1,40}$")]
-
-
-def month_of(db: TenantDb, scope: InSchool, period: str | None) -> tuple[str, date, date]:
-    """The month asked for (or the current one in the time zone of the school) and its bounds."""
-    chosen = period if period is not None else queries.current_period(db, scope.school_id)
-    if chosen is None:
-        raise not_found()
-    start, end = month_bounds(chosen)
-    return chosen, start, end
 
 
 @router.get(

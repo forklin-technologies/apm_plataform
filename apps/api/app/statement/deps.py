@@ -2,6 +2,7 @@
 session, and a permission marker that accepts more than one permission."""
 
 from dataclasses import dataclass
+from datetime import date
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -15,6 +16,8 @@ from app.auth.responses import problem_responses
 from app.core.errors import PROBLEM_MEDIA_TYPE, ProblemError
 from app.routers.deps import get_tenant_db
 from app.schemas.problem import Problem
+from app.statement import queries
+from app.statement.periods import month_bounds
 
 TenantDb = Annotated[Session, Depends(get_tenant_db)]
 
@@ -105,3 +108,12 @@ def school_in_context(school_id: UUID, db: TenantDb) -> SchoolScope:
 
 
 InSchool = Annotated[SchoolScope, Depends(school_in_context)]
+
+
+def month_of(db: Session, scope: SchoolScope, period: str | None) -> tuple[str, date, date]:
+    """The month asked for (or the current one in the time zone of the school) and its bounds."""
+    chosen = period if period is not None else queries.current_period(db, scope.school_id)
+    if chosen is None:
+        raise not_found()
+    start, end = month_bounds(chosen)
+    return chosen, start, end
