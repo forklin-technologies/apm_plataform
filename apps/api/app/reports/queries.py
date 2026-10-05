@@ -45,11 +45,12 @@ def pending_entries(db: Session, school_id: UUID) -> list[dict[str, Any]]:
 
 
 def set_report_ref(db: Session, closing_id: UUID, ref: str) -> None:
-    """Record that the PDF exists. The column is set ONCE: a second writer matches no row."""
+    """Record that the PDF exists. The column is set ONCE (a second writer matches no row) and only
+    on an ACTIVE closing: a reopened one was superseded."""
     db.execute(
         text(
             "UPDATE monthly_closings SET report_ref = :ref "
-            "WHERE id = :closing_id AND report_ref IS NULL"
+            "WHERE id = :closing_id AND report_ref IS NULL AND reopened_at IS NULL"
         ),
         {"ref": ref, "closing_id": closing_id},
     )

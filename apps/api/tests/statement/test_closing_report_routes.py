@@ -279,3 +279,50 @@ def test_the_viewer_never_gets_the_free_text_of_a_line_but_management_does(
     assert "R$ 20,00" in seen_by_viewer
     assert "Material de pintura comprado por Zélia Pintora" in seen_by_management
     assert "devolvido pela professora Rosa Tabajara" in seen_by_management
+
+
+def test_a_read_only_role_draws_the_pdf_and_writes_nothing(
+    scene: Scene, login: Login, admin_engine: Engine
+) -> None:
+    created = close_march(login, scene)
+    treasurer = login(scene.users["treasurer"])
+
+    by_viewer = login(scene.users["viewer"]).get(report_path(scene, created["id"]))
+    after_viewer = treasurer.get(closings(scene.fresh.school, f"/{created['id']}")).json()
+    with admin_engine.connect() as conn:
+        audited: int = conn.execute(
+            text(
+                "SELECT count(*) FROM audit_logs WHERE entity_id = :c AND action = 'monthly_closings.update'"
+            ),
+            {"c": created["id"]},
+        ).scalar_one()
+    by_treasurer = treasurer.get(report_path(scene, created["id"]))
+    after_treasurer = treasurer.get(closings(scene.fresh.school, f"/{created['id']}")).json()
+
+    assert by_viewer.status_code == 200 and by_viewer.content.startswith(b"%PDF-")
+    assert after_viewer["report_ref"] is None and audited == 0  # nothing written, nothing audited
+    assert by_treasurer.status_code == 200
+    assert after_treasurer["report_ref"].startswith("pdf-v1:")  # management records it
+
+
+def test_the_reference_is_only_ever_written_on_an_active_closing(
+    scene: Scene, login: Login, app_engine: Engine, admin_engine: Engine
+) -> None:
+    from sqlalchemy.orm import Session
+
+    from app.db.tenant import TenantContext, bind_tenant
+    from app.reports import queries
+
+    created = close_march(login, scene)
+    assert reopen(login(scene.users["admin"]), scene, created["id"]).status_code == 200
+
+    with Session(app_engine) as session:
+        bind_tenant(session, TenantContext(scene.fresh.org, scene.fresh.school))
+        queries.set_report_ref(session, uuid.UUID(created["id"]), "pdf-v1:late")
+        session.commit()
+    with admin_engine.connect() as conn:
+        stored: str | None = conn.execute(
+            text("SELECT report_ref FROM monthly_closings WHERE id = :c"), {"c": created["id"]}
+        ).scalar_one()
+
+    assert stored is None  # a reopened closing was superseded: nothing is recorded on it

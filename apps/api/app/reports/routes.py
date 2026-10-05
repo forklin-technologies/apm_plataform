@@ -69,7 +69,8 @@ def closing_report_pdf(
     """Drawn from the stored snapshot of an ACTIVE closing, never recomputed: the sections must add
     up to the figures of the closing or no PDF is made (409 `closing_mismatch`). Whoever lacks
     `reports:read` (the `viewer`) gets the version without personal data. `report_ref` is written
-    the first time a PDF is made, and never again."""
+    the first time MANAGEMENT makes a PDF of an active closing, and never again: a read-only role
+    draws the PDF and writes nothing."""
     closing = get_closing(db, scope.school_id, closing_id)
     if closing is None:
         raise not_found()
@@ -78,6 +79,7 @@ def closing_report_pdf(
 
     organization_name, school_name = queries.names(db, scope.school_id)
     generated_at = datetime.now(UTC)
+    management = Permission.REPORTS_READ in permissions_for(principal.role)
     try:
         report = build_closing_report(
             closing=closing,
@@ -89,7 +91,7 @@ def closing_report_pdf(
             organization_name=organization_name,
             school_name=school_name,
             generated_at=generated_at,
-            personal_data=Permission.REPORTS_READ in permissions_for(principal.role),
+            personal_data=management,
         )
     except ReportMismatch:
         raise ProblemError(
@@ -97,7 +99,7 @@ def closing_report_pdf(
         ) from None
     content = render_closing_report(report)
 
-    if closing["report_ref"] is None:
+    if management and closing["report_ref"] is None:
         stamp = generated_at.strftime("%Y-%m-%dT%H:%M:%SZ")
         queries.set_report_ref(db, closing_id, f"pdf-v1:{stamp}:{closing['entries_hash'][:16]}")
         db.commit()
