@@ -117,6 +117,19 @@ DEV_ORIGINS = (
 MIN_AUTH_SECRET_LENGTH = 32
 
 
+_DEFAULT_PORTS = {"http": 80, "https": 443}
+
+
+def canonical_origin(scheme: str, netloc: str) -> str:
+    """scheme://host[:port], lower-case, without the port the scheme already implies. A browser
+    sends `Origin: https://app.example.com` (no `:443`), so both spellings are the same origin."""
+    scheme, netloc = scheme.lower(), netloc.lower()
+    default = _DEFAULT_PORTS.get(scheme)
+    if default is not None and netloc.endswith(f":{default}"):
+        netloc = netloc[: -len(f":{default}")]
+    return f"{scheme}://{netloc}"
+
+
 def _normalise_origin(origin: str) -> str:
     parts = urlsplit(origin.strip())
     if parts.scheme not in ("http", "https") or not parts.netloc or parts.path not in ("", "/"):
@@ -127,7 +140,7 @@ def _normalise_origin(origin: str) -> str:
         raise ValueError(
             "PUBLIC_ORIGINS must be a comma-separated list of origins (scheme://host[:port])"
         )
-    return f"{parts.scheme}://{parts.netloc.lower()}"
+    return canonical_origin(parts.scheme, parts.netloc)
 
 
 class ApiSettings(Settings):

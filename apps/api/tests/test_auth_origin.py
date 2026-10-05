@@ -81,3 +81,20 @@ def test_an_origin_or_referer_that_cannot_be_parsed_is_refused_not_a_server_erro
     assert response.status_code == 403, response.text
     assert response.json()["code"] == "origin_not_allowed"
     no_unhandled_error(caplog)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("https://app.example.test", "https://app.example.test"),
+        ("https://APP.example.test:443/path?x=1", "https://app.example.test"),
+        ("http://localhost:80", "http://localhost"),
+        ("http://localhost:3000", "http://localhost:3000"),
+        ("https://app.example.test:80", "https://app.example.test:80"),
+        ("http://[::1]:80/x", "http://[::1]"),
+    ],
+)
+def test_the_requesting_origin_ignores_the_default_port(value: str, expected: str) -> None:
+    from app.core.middleware import _origin_of  # noqa: PLC0415, SLF001
+
+    assert _origin_of(value) == expected

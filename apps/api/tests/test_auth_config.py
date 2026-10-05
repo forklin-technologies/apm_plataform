@@ -245,3 +245,18 @@ def test_configured_origins_replace_the_defaults_and_are_normalised() -> None:
 def test_an_origin_that_is_not_an_origin_is_refused(origin: str) -> None:
     with pytest.raises(ValidationError, match="PUBLIC_ORIGINS must be a comma-separated list"):
         build(public_origins=origin)
+
+
+def test_the_default_port_of_a_scheme_is_the_same_origin_as_no_port() -> None:
+    """Review of 2026-10-05: `https://app.example.test:443` in PUBLIC_ORIGINS never matched the
+    `Origin: https://app.example.test` a browser sends, so every login was refused."""
+    settings = build(
+        public_origins="https://App.Example.test:443, http://plain.example.test:80, "
+        "https://other.example.test:8443, https://other.example.test:80"
+    )
+    assert settings.allowed_origins == (
+        "https://app.example.test",
+        "http://plain.example.test",
+        "https://other.example.test:8443",
+        "https://other.example.test:80",  # 80 is not the default port of https
+    )

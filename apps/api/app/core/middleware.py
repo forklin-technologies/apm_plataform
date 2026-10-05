@@ -21,6 +21,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from app.auth.csrf import SAFE_METHODS
+from app.core.config import canonical_origin
 from app.core.errors import ProblemError, problem_response
 
 ORIGIN_EXEMPT_PATHS: frozenset[str] = frozenset()
@@ -47,7 +48,7 @@ def _origin_of(value: str | None) -> str | None:
         return None
     if not parts.scheme or not parts.netloc:
         return None
-    return f"{parts.scheme}://{parts.netloc}".lower()
+    return canonical_origin(parts.scheme, parts.netloc)
 
 
 def _requesting_origin(request: Request) -> str | None:
