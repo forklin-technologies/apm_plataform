@@ -3,6 +3,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { SCHOOLS } from "@/mocks/fixtures";
+import { AcceptInvitationForm } from "./invitation/AcceptInvitationForm";
 import { LoginForm } from "./login/LoginForm";
 import { AmountStep } from "./portal/AmountStep";
 import { IdentificationStep } from "./portal/IdentificationStep";
@@ -52,6 +53,16 @@ describe("formularios nunca vazam dados na URL", () => {
     const form = container.querySelector("form")!;
     expect(form.method).toBe("post");
     expect(fireEvent.submit(form)).toBe(false);
+  });
+
+  it("aceite de convite: method=post, preventDefault e senhas como password com new-password", () => {
+    const { container } = render(<AcceptInvitationForm token={"a".repeat(43)} signedInAs={null} />);
+    const form = container.querySelector("form")!;
+    expect(form.method).toBe("post");
+    expect(fireEvent.submit(form)).toBe(false);
+    for (const input of container.querySelectorAll<HTMLInputElement>("input[type=password]")) {
+      expect(input.getAttribute("autocomplete")).toBe("new-password");
+    }
   });
 
   it("guarda no codigo-fonte: todo <form> do projeto declara method=\"post\"", () => {
