@@ -1,15 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useState } from "react";
 import { ApiStatusChip } from "@/components/status/ApiStatusChip";
-import { ButtonLink } from "@/components/ui/Button";
+import { Button, ButtonLink } from "@/components/ui/Button";
 import { Wordmark } from "@/components/ui/Logo";
 import { PrototypeBadge } from "@/components/ui/PrototypeBadge";
 import { api } from "@/lib/api";
-import type { DashboardData, Organization } from "@/lib/api/types";
+import type { DashboardData, SchoolRef, Session } from "@/lib/api/types";
+import { describeAuthError, isSessionLost } from "@/lib/auth-messages";
 import type { PainelSection } from "@/lib/painel-section";
+import { ROLE_LABELS, membershipTitle } from "@/lib/roles";
 import { KIND_LABELS } from "@/lib/status";
+import { ContextChooser } from "./ContextChooser";
 import { Indicators } from "./Indicators";
 import { KIND_META } from "./kinds";
 import { MovementList } from "./MovementList";
@@ -18,43 +22,14 @@ import { TenantSwitcher } from "./TenantSwitcher";
 import { WeeklyChart } from "./WeeklyChart";
 
 interface PainelShellProps {
-  organizations: Organization[];
-  initialSchoolId: string;
-  initialData: DashboardData;
+  /** REAL: quem esta logado e onde atua (GET /auth/me, lido no servidor). */
+  session: Session;
+  /**
+   * SIMULADO: indicadores e movimentacoes ainda nao tem endpoint. Vem de src/mocks e NAO depende
+   * do vinculo real: e so um exemplo do que a tela vai mostrar.
+   */
+  example: { school: SchoolRef; data: DashboardData };
   section: PainelSection;
-}
-
-type Load = { state: "ready"; data: DashboardData } | { state: "loading" } | { state: "error" };
-
-function Skeleton() {
-  return (
-    <div role="status" aria-live="polite" aria-busy="true">
-      <span className="sr-only">Carregando os dados da escola…</span>
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]" aria-hidden="true">
-        <div className="rounded-[var(--r-lg)] bg-surface p-6 shadow-[0_0_0_1px_var(--line)]">
-          <div className="skeleton h-4 w-32" />
-          <div className="skeleton mt-4 h-12 w-64 max-w-full" />
-          <div className="skeleton mt-8 h-16 w-full" />
-        </div>
-        <div className="rounded-[var(--r-lg)] bg-surface p-6 shadow-[0_0_0_1px_var(--line)]">
-          <div className="skeleton h-4 w-48" />
-          <div className="skeleton mt-6 h-40 w-full" />
-        </div>
-      </div>
-      <div className="mt-8 space-y-px overflow-hidden rounded-[var(--r-lg)] bg-surface shadow-[0_0_0_1px_var(--line)]" aria-hidden="true">
-        {[0, 1, 2, 3].map((i) => (
-          <div key={i} className="flex items-center gap-4 border-b border-line px-5 py-4 last:border-0">
-            <div className="skeleton size-10 shrink-0 !rounded-[12px]" />
-            <div className="flex-1 space-y-2">
-              <div className="skeleton h-4 w-3/5" />
-              <div className="skeleton h-3 w-2/5" />
-            </div>
-            <div className="skeleton h-5 w-20" />
-          </div>
-        ))}
-      </div>
-    </div>
-  );
 }
 
 function EmptyState({ title, text, portalSlug }: { title: string; text: string; portalSlug?: string }) {
@@ -79,49 +54,76 @@ function EmptyState({ title, text, portalSlug }: { title: string; text: string; 
   );
 }
 
-export function PainelShell({ organizations, initialSchoolId, initialData, section }: PainelShellProps) {
-  const [schoolId, setSchoolId] = useState(initialSchoolId);
-  const [load, setLoad] = useState<Load>({ state: "ready", data: initialData });
-  const requestRef = useRef(0);
-  const firstRender = useRef(true);
+export function PainelShell({ session, example, section }: PainelShellProps) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
 
-  const organization = organizations.find((org) => org.schools.some((s) => s.id === schoolId)) ?? organizations[0]!;
-  const school = organization.schools.find((s) => s.id === schoolId) ?? organization.schools[0]!;
+  async function selectMembership(membershipId: string) {
+    if (busy) return;
+    setBusy(true);
+    setProblem(null);
+    const result = await api.auth.switchContext(membershipId);
+    if (result.ok) {
+      router.refresh(); // o servidor le /auth/me de novo, ja com o novo vinculo
+    } else if (isSessionLost(result.error)) {
+      router.replace("/login");
+    } else {
+      setProblem(describeAuthError(result.error, "context"));
+    }
+    setBusy(false);
+  }
 
-  useEffect(() => {
-    if (firstRender.current) {
-      firstRender.current = false;
+  async function signOut() {
+    if (signingOut) return;
+    setSigningOut(true);
+    setProblem(null);
+    const result = await api.auth.logout();
+    if (result.ok) {
+      router.replace("/login");
+      router.refresh();
       return;
     }
-    const request = ++requestRef.current;
-    let cancelled = false;
-    setLoad({ state: "loading" });
-    void api.dashboard.getDashboard(schoolId).then((result) => {
-      if (cancelled || request !== requestRef.current) return;
-      setLoad(result.ok ? { state: "ready", data: result.data } : { state: "error" });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [schoolId]);
+    setProblem(describeAuthError(result.error, "logout"));
+    setSigningOut(false);
+  }
+
+  const active = session.activeMembership;
+  if (!active) {
+    return (
+      <ContextChooser
+        session={session}
+        busy={busy}
+        signingOut={signingOut}
+        problem={problem}
+        onSelect={selectMembership}
+        onSignOut={signOut}
+      />
+    );
+  }
+
+  const contextName = membershipTitle(active);
+  const data = example.data;
 
   const title = section === "resumo" ? "Resumo" : KIND_META[section].plural;
-  const data = load.state === "ready" ? load.data : null;
   const movements =
-    data === null
-      ? []
-      : section === "resumo"
-        ? data.movements.slice(0, 8)
-        : data.movements.filter((m) => m.kind === section);
+    section === "resumo" ? data.movements.slice(0, 8) : data.movements.filter((m) => m.kind === section);
 
   const switcher = (compact: boolean) => (
     <TenantSwitcher
-      organizations={organizations}
-      organization={organization}
-      school={school}
-      onSelect={setSchoolId}
+      memberships={session.memberships}
+      active={active}
+      onSelect={selectMembership}
+      busy={busy}
       compact={compact}
     />
+  );
+
+  const signOutButton = (
+    <Button variant="secondary" size="md" onClick={signOut} disabled={signingOut}>
+      {signingOut ? "Saindo…" : "Sair"}
+    </Button>
   );
 
   return (
@@ -152,6 +154,11 @@ export function PainelShell({ organizations, initialSchoolId, initialData, secti
           </ul>
         </nav>
         <div className="mt-auto space-y-3 px-1.5">
+          <div className="min-w-0">
+            <p className="truncate text-sub font-semibold text-ink">{session.user.fullName}</p>
+            <p className="truncate text-foot text-ink-2">{ROLE_LABELS[active.role]}</p>
+          </div>
+          {signOutButton}
           <PrototypeBadge />
           <ApiStatusChip />
         </div>
@@ -162,6 +169,7 @@ export function PainelShell({ organizations, initialSchoolId, initialData, secti
         <header className="bar-material sticky top-0 z-30 border-b border-line px-4 py-2 lg:hidden">
           <div className="mx-auto flex max-w-3xl items-center gap-2">
             <div className="min-w-0 flex-1">{switcher(true)}</div>
+            {signOutButton}
           </div>
         </header>
 
@@ -170,8 +178,7 @@ export function PainelShell({ organizations, initialSchoolId, initialData, secti
             <div>
               <h1 className="text-title text-ink sm:text-[2.25rem]">{title}</h1>
               <p className="mt-1 text-body text-ink-2">
-                {school.name}
-                {data && section === "resumo" ? ` · ${data.summary.periodLabel}` : ""}
+                {contextName} · {ROLE_LABELS[active.role]}
               </p>
             </div>
             <div className="flex flex-col items-start gap-2 lg:hidden">
@@ -179,16 +186,18 @@ export function PainelShell({ organizations, initialSchoolId, initialData, secti
             </div>
           </div>
 
-          {load.state === "loading" && <Skeleton />}
-
-          {load.state === "error" && (
-            <div role="alert" className="rounded-[var(--r-lg)] bg-bad-soft px-6 py-5 text-bad">
-              <p className="text-headline">Não foi possível carregar os dados desta escola</p>
-              <p className="mt-1 text-body">Tente trocar de escola de novo em instantes.</p>
-            </div>
+          {problem && (
+            <p role="alert" className="mb-5 rounded-[var(--r-md)] bg-bad-soft px-4 py-3 text-sub font-medium text-bad">
+              {problem}
+            </p>
           )}
 
-          {data && section === "resumo" && (
+          <p role="note" className="mb-6 rounded-[var(--r-md)] bg-info-soft px-4 py-3 text-sub text-info">
+            Protótipo: os números e as movimentações abaixo são de exemplo ({data.summary.periodLabel}). O seu nome e o
+            seu vínculo vêm da sua conta, mas indicadores, movimentações, despesas e extrato ainda não estão ligados à API.
+          </p>
+
+          {section === "resumo" && (
             <div className="space-y-8">
               {data.movements.length === 0 ? (
                 <>
@@ -196,7 +205,7 @@ export function PainelShell({ organizations, initialSchoolId, initialData, secti
                   <EmptyState
                     title={`Nenhuma movimentação em ${data.summary.periodLabel.split(" de ")[0]?.toLowerCase()}`}
                     text="Quando as famílias contribuírem e a tesouraria registrar despesas, tudo aparece aqui, com o status de cada pagamento."
-                    portalSlug={school.slug}
+                    portalSlug={example.school.slug}
                   />
                 </>
               ) : (
@@ -220,17 +229,17 @@ export function PainelShell({ organizations, initialSchoolId, initialData, secti
             </div>
           )}
 
-          {data && section !== "resumo" && (
+          {section !== "resumo" && (
             <section aria-labelledby="kind-title">
               <h2 id="kind-title" className="sr-only">
-                {KIND_META[section].plural} de {school.name}
+                {KIND_META[section].plural} de exemplo
               </h2>
               <p className="mb-4 max-w-[60ch] text-body text-ink-2">{KIND_META[section].definition}</p>
               {movements.length === 0 ? (
                 <EmptyState
                   title={`Nenhuma ${KIND_LABELS[section].toLowerCase()} neste período`}
-                  text={`Quando houver ${KIND_META[section].plural.toLowerCase()} em ${school.name}, elas aparecem aqui, uma por linha, com o status de cada uma.`}
-                  portalSlug={section === "CONTRIBUTION" ? school.slug : undefined}
+                  text={`Quando houver ${KIND_META[section].plural.toLowerCase()} no exemplo, elas aparecem aqui, uma por linha, com o status de cada uma.`}
+                  portalSlug={section === "CONTRIBUTION" ? example.school.slug : undefined}
                 />
               ) : (
                 <MovementList movements={movements} label={KIND_META[section].plural} />
