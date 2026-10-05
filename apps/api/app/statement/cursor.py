@@ -10,6 +10,7 @@ import binascii
 import json
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from app.core.errors import ProblemError
 
@@ -24,9 +25,13 @@ def invalid_cursor() -> ProblemError:
 
 
 def encode_cursor(**position: Any) -> str:
-    """`datetime` values are written in ISO 8601 (with their offset), everything else as it is."""
+    """`datetime` values are written in ISO 8601 (with their offset), uuids as text."""
     plain = {
-        key: value.isoformat() if isinstance(value, datetime) else value
+        key: value.isoformat()
+        if isinstance(value, datetime)
+        else str(value)
+        if isinstance(value, UUID)
+        else value
         for key, value in position.items()
     }
     raw = json.dumps(plain, separators=(",", ":"), sort_keys=True).encode()
@@ -34,14 +39,19 @@ def encode_cursor(**position: Any) -> str:
 
 
 def decode_cursor(
-    cursor: str, *, instants: tuple[str, ...], integers: tuple[str, ...]
+    cursor: str,
+    *,
+    instants: tuple[str, ...],
+    integers: tuple[str, ...] = (),
+    uuids: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """The position a cursor holds: the keys in `instants` as aware datetimes, the keys in
-    `integers` as ints, and nothing else. Anything that does not fit is a 422 `invalid_cursor`."""
+    `integers` as ints, the keys in `uuids` as UUIDs, and nothing else. Anything that does not fit
+    is a 422 `invalid_cursor`."""
     try:
         padded = cursor + "=" * (-len(cursor) % 4)
         data = json.loads(base64.b64decode(padded, altchars=b"-_", validate=True))
-        if not isinstance(data, dict) or set(data) != set(instants) | set(integers):
+        if not isinstance(data, dict) or set(data) != {*instants, *integers, *uuids}:
             raise ValueError
         position: dict[str, Any] = {}
         for key in instants:
@@ -53,6 +63,8 @@ def decode_cursor(
             if type(data[key]) is not int:
                 raise ValueError
             position[key] = data[key]
+        for key in uuids:
+            position[key] = UUID(data[key])
     except (ValueError, TypeError, binascii.Error):
         raise invalid_cursor() from None
     return position

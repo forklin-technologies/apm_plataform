@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.auth.emailer import build_sender
+from app.closing.routes import router as closing_router
 from app.core.config import ApiSettings, get_api_settings
 from app.core.errors import install_error_handlers
 from app.core.middleware import OriginCheckMiddleware, RequestIdMiddleware
@@ -56,6 +57,7 @@ def create_app(
     app.add_middleware(RequestIdMiddleware)
     app.include_router(api_router)
     app.include_router(statement_router)
+    app.include_router(closing_router)
     _document_security(app, settings)
     return app
 
