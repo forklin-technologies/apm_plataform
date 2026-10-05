@@ -190,10 +190,15 @@ EXPECTED_FUNCTIONS = {
     # tenancy and authentication (0003 to 0006): the context functions and the closed list of ADR-016
     "app_session_id", "app_user_id", "accept_invitation", "find_login_identity",
     "list_memberships_for_user",
+    # the public flow (0008, ADR-018)
+    "resolve_school_public", "resolve_webhook_target", "resolve_receipt",
 }  # fmt: skip
 # The only SECURITY DEFINER functions of the schema (ADR-016, owned by apm_definer; the financial
 # schema has none). tests/test_app_role.py asserts their owner, search_path and who may execute them.
-DEFINER_FUNCTIONS = {"accept_invitation", "find_login_identity", "list_memberships_for_user"}
+DEFINER_FUNCTIONS = {
+    "accept_invitation", "find_login_identity", "list_memberships_for_user",
+    "resolve_school_public", "resolve_webhook_target", "resolve_receipt",
+}  # fmt: skip
 
 
 def _decode(trigger_type: int) -> tuple[str, frozenset[str], str]:

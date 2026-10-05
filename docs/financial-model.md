@@ -146,6 +146,22 @@ Each one is enforced **in the database**, usually twice (a declarative constrain
 | the suggested amounts fit the minimum and the maximum; the required and optional fields are disjoint and known | `ck_school_settings_suggested_amounts_valid`, `ck_school_settings_identification_fields_valid` |
 | a month is closed once, in order, after it ended | `monthly_closings_20_snapshot`, `uq_monthly_closings_active_period` |
 
+## The public flow (0008, ADR-018)
+
+Before there is a session the database does not know which school is asking and row level security shows nothing. Three requests arrive in that state, and each has one narrow `SECURITY DEFINER` function (owner `apm_definer`, `search_path = pg_catalog`, static SQL, `EXECUTE` only for `apm_app`, privileges per column, one explicit policy `TO apm_definer` each). They answer with **no row** for anything unknown, expired or of another school, so the API gives the same 404 for all of them. The ids they return never leave the server.
+
+| Function | Looks up | Returns |
+| --- | --- | --- |
+| `resolve_school_public(p_slug)` | the school by its public slug (only a school with an ACTIVE payment account has a public page) | `organization_id`, `school_id`, `slug`, `name`, the accent colors, the suggested amounts, `allow_custom_amount`, the minimum and the maximum, the required and the optional fields |
+| `resolve_webhook_target(p_provider, p_secret_hash)` | an ACTIVE payment account by the SHA-256 of the secret the provider sent | `organization_id`, `school_id`, `payment_account_id` |
+| `resolve_receipt(p_token_hash)` | a contribution by the SHA-256 of its receipt token (not expired) | `organization_id`, `school_id`, `transaction_id` |
+
+Nothing else of the public flow needs a function: once the school is resolved the API binds its context (`app.actor_type = PUBLIC`, or `SYSTEM` for the webhook) and writes as `apm_app` under row level security.
+
+- **Idempotency.** `contributions.idempotency_key` is the `Idempotency-Key` of the public `POST`, unique **per school** (`uq_contributions_school_id_idempotency_key`), written once and never changed. The same key answers with the same contribution.
+- **`secret_ref` is the platform's.** `apm_app` can read the reference but cannot insert or update it (a column privilege taken away in 0008): only the admin of the migrations and the seed, later a platform flow, name the secret an account uses, so a school cannot point its account at the secret of another school. By convention it is `env:PIX_<SLUG>`.
+- **The receipt link** is valid for 30 days (`receipt_expires_at`); the public routes never return the token again, only the hash is stored.
+
 ## Isolation: the lessons of M1
 
 Foreign key checks run **without** row level security. A single-column foreign key to a tenant table therefore answers "does this id exist anywhere?" to whoever writes it, and a unique index that is not scoped to the school answers the same with a duplicate-key error. Everything below exists to close that:
@@ -172,7 +188,7 @@ Foreign key checks run **without** row level security. A single-column foreign k
 | `expense_attachments` | everything but the id | none |
 | `categories` | scope, `key`, `name`, `applies_to`, `report_group`, `requires_approval`, `is_active` | `name`, `is_active`, `updated_at` |
 | `school_settings` | the business columns | the business columns |
-| `payment_accounts` | scope, `provider`, `external_account_id`, `status`, `secret_ref`, `webhook_secret_hash` | `external_account_id`, `status`, `secret_ref`, `webhook_secret_hash`, `updated_at` |
+| `payment_accounts` | scope, `provider`, `external_account_id`, `status`, `webhook_secret_hash` (`secret_ref` is written only by the platform since 0008) | `external_account_id`, `status`, `webhook_secret_hash`, `updated_at` |
 | `pix_charges` | key, scope, `payment_account_id`, `provider`, `txid`, `status`, `amount_cents`, `expires_at`, `emv_payload` | `status`, `end_to_end_id`, `paid_at`, `received_amount_cents`, `divergence_reason`, `emv_payload`, `updated_at` |
 | `webhook_events` | scope, `provider`, `idempotency_key`, `end_to_end_id`, `raw_payload`, `signature_valid` | `processed_at`, `processing_error`, `attempts` |
 | `audit_logs` | scope, `action`, `entity_type`, `entity_id`, `entity_reference`, `before_data`, `after_data` | none |

@@ -552,7 +552,20 @@ DEFINER_COLUMNS = {
         "revoked_at",
     },
     ("invitations", "UPDATE"): {"accepted_at", "accepted_user_id", "updated_at"},
-}
+    # 0008 (ADR-018): what the three functions of the public flow read
+    ("school_settings", "SELECT"): {
+        "school_id", "organization_id", "suggested_amounts_cents", "allow_custom_amount",
+        "min_contribution_cents", "max_contribution_cents", "required_fields", "optional_fields",
+        "brand_accent", "brand_accent_contrast",
+    },
+    ("payment_accounts", "SELECT"): {
+        "id", "organization_id", "school_id", "provider", "status", "webhook_secret_hash",
+    },
+    ("contributions", "SELECT"): {
+        "transaction_id", "organization_id", "school_id", "receipt_token_hash",
+        "receipt_expires_at",
+    },
+}  # fmt: skip
 
 
 def test_apm_definer_has_exactly_these_column_privileges_and_no_others(

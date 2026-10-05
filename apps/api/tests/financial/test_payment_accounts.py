@@ -356,8 +356,10 @@ def test_no_function_of_the_schema_returns_or_mentions_the_hash(admin_engine: En
             .scalars()
             .all()
         )
-    # Only the audit trigger function names columns generically, from its arguments (never this one).
-    assert mentions == []
+    # Only the audit trigger function names columns generically, from its arguments (never this
+    # one). The one function that reads the hash is resolve_webhook_target (0008, ADR-018): it takes
+    # the hash of the received secret and answers with ids, never with the hash.
+    assert mentions == ["resolve_webhook_target"]
 
 
 def test_the_orm_model_defers_the_column_so_a_normal_load_works_for_the_application_role(

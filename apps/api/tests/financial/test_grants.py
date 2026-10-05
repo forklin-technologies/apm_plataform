@@ -48,6 +48,7 @@ INSERTABLE: dict[str, set[str]] = {
         "contributor_phone",
         "receipt_token_hash",
         "receipt_expires_at",
+        "idempotency_key",
     },
     "expenses": {
         "transaction_id",
@@ -105,7 +106,6 @@ INSERTABLE: dict[str, set[str]] = {
         "provider",
         "external_account_id",
         "status",
-        "secret_ref",
         "webhook_secret_hash",
     },
     "pix_charges": {
@@ -200,7 +200,6 @@ UPDATABLE: dict[str, set[str]] = {
     "payment_accounts": {
         "external_account_id",
         "status",
-        "secret_ref",
         "webhook_secret_hash",
         "updated_at",
     },
@@ -225,7 +224,10 @@ UNREADABLE: dict[str, set[str]] = {"payment_accounts": {"webhook_secret_hash"}}
 # SECURITY DEFINER functions of ADR-016: the application role calls them too, and
 # tests/test_app_role.py holds their exact definition.
 CONTEXT_FUNCTIONS = {"app_org", "app_school", "app_session_id", "app_user_id"}
-DEFINER_FUNCTIONS = {"accept_invitation", "find_login_identity", "list_memberships_for_user"}
+DEFINER_FUNCTIONS = {
+    "accept_invitation", "find_login_identity", "list_memberships_for_user",
+    "resolve_school_public", "resolve_webhook_target", "resolve_receipt",
+}  # fmt: skip
 # The only functions of the financial schema the application role may call.
 CALLABLE_FUNCTIONS = {
     "statement_entries",

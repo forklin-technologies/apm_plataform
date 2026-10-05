@@ -201,6 +201,20 @@ FUNCTIONS = {
         "s",
     ),
     **{
+        signature: (
+            "apm_definer",
+            True,
+            ["search_path=pg_catalog"],
+            {"apm_definer=X/apm_definer", "apm_app=X/apm_definer"},
+            "s",
+        )
+        for signature in (
+            "resolve_school_public(text)",
+            "resolve_webhook_target(text,text)",
+            "resolve_receipt(text)",
+        )
+    },
+    **{
         f"{name}()": (
             "apm_owner",
             False,
@@ -267,6 +281,11 @@ DEFINER_POLICIES = {
     "memberships.memberships_definer_select",
     "organizations.organizations_definer_select",
     "schools.schools_definer_select",
+    # 0008 (ADR-018): the three functions of the public flow
+    "schools.schools_definer_select_public",
+    "school_settings.school_settings_definer_select",
+    "payment_accounts.payment_accounts_definer_select",
+    "contributions.contributions_definer_select",
     "users.users_definer_insert",
     "users.users_definer_select",
 }
@@ -403,8 +422,8 @@ def test_there_is_no_system_mode_and_the_open_policies_are_the_closed_list_of_ap
             )
         ).all()
 
-    # 30 of TASK-003 and 0006 + 37 of the financial schema (0007)
-    assert len(policies) == 30 + 37
+    # 30 of TASK-003 and 0006 + 37 of the financial schema (0007) + 4 of the public flow (0008)
+    assert len(policies) == 30 + 37 + 4
     open_ones = set()
     for name, qual, check, roles in policies:
         if qual.strip().lower() == "true" or check.strip().lower() == "true":

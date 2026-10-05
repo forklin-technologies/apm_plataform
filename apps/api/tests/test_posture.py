@@ -183,7 +183,7 @@ def test_connecting_as_a_different_role_is_reported(admin_engine: Engine) -> Non
         assert cheap_posture_ok(connection) is False
 
 
-def test_the_closed_list_of_security_definer_functions_is_the_three_of_adr_016() -> None:
+def test_the_closed_list_of_security_definer_functions_is_the_six_of_adr_016_and_018() -> None:
     assert (
         frozenset(
             {
@@ -191,6 +191,9 @@ def test_the_closed_list_of_security_definer_functions_is_the_three_of_adr_016()
                 "public.list_memberships_for_user(p_user_id uuid)",
                 "public.accept_invitation(p_token_hash bytea, p_full_name text, "
                 "p_password_hash text, p_existing_user_id uuid)",
+                "public.resolve_school_public(p_slug text)",
+                "public.resolve_webhook_target(p_provider text, p_secret_hash text)",
+                "public.resolve_receipt(p_token_hash text)",
             }
         )
         == posture.ALLOWED_SECURITY_DEFINER

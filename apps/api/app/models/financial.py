@@ -226,6 +226,10 @@ class Contribution(ScopeMixin, TimestampMixin, Base):
         *scope_constraints("contributions"),
         detail_fk("contributions"),
         UniqueConstraint("receipt_token_hash", name="uq_contributions_receipt_token_hash"),
+        # The Idempotency-Key of the public POST: per school, never global (the M1 class).
+        UniqueConstraint(
+            "school_id", "idempotency_key", name="uq_contributions_school_id_idempotency_key"
+        ),
         # Per school, never global: a global UNIQUE would answer for other tenants (the M1 class).
         UniqueConstraint(
             "school_id", "external_reference", name="uq_contributions_school_id_external_reference"
@@ -298,6 +302,9 @@ class Contribution(ScopeMixin, TimestampMixin, Base):
     # SHA-256 of the receipt token; the token itself is never stored (ADR-010).
     receipt_token_hash: Mapped[str | None] = mapped_column(Text)
     receipt_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # The Idempotency-Key (a uuid chosen by the client) of the public POST that created it; written
+    # once with the row. The same key answers with the same contribution, never a second one.
+    idempotency_key: Mapped[uuid.UUID | None] = mapped_column(Uuid)
     # Why the management settled a REVIEW_REQUIRED contribution; written once, and first.
     review_decision_reason: Mapped[str | None] = mapped_column(Text)
 
