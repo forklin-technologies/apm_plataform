@@ -92,7 +92,9 @@ NOT_FOUND: dict[int | str, dict[str, Any]] = {
 
 
 def _errors(*codes: int, extra: dict[int | str, dict[str, Any]] | None = None) -> dict[Any, Any]:
-    return problem_responses(*codes, extra={**NOT_FOUND, **(extra or {})})
+    """The problems a route can answer. 422 is always there: every route has a path parameter to
+    validate, and the framework would otherwise document its own 422 instead of the problem."""
+    return problem_responses(*sorted({*codes, 422}), extra={**NOT_FOUND, **(extra or {})})
 
 
 # --- categories -----------------------------------------------------------------------------------

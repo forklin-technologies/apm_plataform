@@ -75,6 +75,15 @@ class Client:
     def patch(self, tail: str = "", json: Any = None, **kwargs: Any) -> Response:
         return self.request("PATCH", tail, json=json, **kwargs)
 
+    def raw_post(self, tail: str, content: Any, content_type: str) -> Response:
+        """A POST whose body the test client does not shape (to leave out the Content-Length)."""
+        headers = {
+            "Origin": self.api.origin,
+            "Content-Type": content_type,
+            "X-CSRF-Token": self.api.csrf or "",
+        }
+        return self.api.client.post(self.path(tail), content=content, headers=headers)
+
     def upload(
         self,
         expense_id: str,
@@ -210,3 +219,12 @@ def storage_overrides(directory: Path, max_bytes: int) -> Callable[[Any], None]:
         app.dependency_overrides[get_storage_settings] = lambda: settings
 
     return configure
+
+
+def stored_files(directory: Path) -> list[Path]:
+    """Every file the store holds (none, when the directory was never made)."""
+    return (
+        sorted(path for path in directory.rglob("*") if path.is_file())
+        if directory.exists()
+        else []
+    )
