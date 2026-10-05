@@ -53,11 +53,12 @@ def test_an_expired_sandbox_charge_says_so() -> None:
     assert status is not None and status.status == "EXPIRED"
 
 
-def test_only_the_sandbox_exists_for_now() -> None:
-    assert get_provider("SANDBOX") is sandbox_provider()
-    with pytest.raises(ProblemError) as caught:
-        get_provider("BB")
-    assert caught.value.status == 501 and caught.value.code == "provider_not_configured"
+def test_only_the_sandbox_exists_for_now_and_never_in_production() -> None:
+    assert get_provider("SANDBOX", "development") is sandbox_provider()
+    for name, env in (("BB", "development"), ("SANDBOX", "production")):
+        with pytest.raises(ProblemError) as caught:
+            get_provider(name, env)
+        assert caught.value.status == 501 and caught.value.code == "provider_not_configured"
 
 
 def test_the_secret_store_resolves_env_references_and_says_nothing_else(

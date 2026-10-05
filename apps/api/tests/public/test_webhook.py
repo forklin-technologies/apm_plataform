@@ -165,3 +165,68 @@ def test_guessing_secrets_is_limited_by_address(apis: ApiFactory, school: Public
     statuses = [notify(api, "t" * 32, secret=f"guess-{n}").status_code for n in range(7)]
     assert statuses[:5] == [401] * 5
     assert statuses[5] == 429
+
+
+def test_an_event_the_provider_could_not_confirm_yet_is_processed_again_on_retry(
+    apis: ApiFactory, school: PublicSchool, admin_engine: Engine
+) -> None:
+    api = apis.make()
+    txid = txid_of(contribute(api, school.slug, 3000))
+    event = uuid.uuid4().hex
+    assert notify(api, txid, event=event).json() == {"status": "NOT_CONFIRMED"}
+    pending = row(
+        admin_engine,
+        "SELECT processed_at IS NULL, attempts FROM webhook_events WHERE school_id = :s",
+        s=school.fresh.school,
+    )
+    assert tuple(pending) == (True, 1)  # still open: a retry may conclude it
+    sandbox_provider().simulate_payment(txid)
+    assert notify(api, txid, event=event).json() == {"status": "PAID"}  # the SAME event id
+    assert notify(api, txid, event=event).json() == {"status": "DUPLICATE"}
+    assert _charge(admin_engine, school.fresh.school) == ("PAID", "PAID")
+    done = row(
+        admin_engine,
+        "SELECT processed_at IS NOT NULL, attempts, count(*) OVER () FROM webhook_events "
+        "WHERE school_id = :s",
+        s=school.fresh.school,
+    )
+    assert tuple(done) == (True, 2, 1)
+
+
+def test_a_notification_cannot_settle_a_charge_of_another_account_of_the_school(
+    apis: ApiFactory, school: PublicSchool, admin_engine: Engine
+) -> None:
+    api = apis.make()
+    txid = txid_of(contribute(api, school.slug, 3000))
+    sandbox_provider().simulate_payment(txid)
+    second_secret = "second-account-secret-for-tests-0123456789"  # noqa: S105  (fake)
+    with admin_engine.begin() as conn:
+        conn.execute(
+            text("UPDATE payment_accounts SET status = 'INACTIVE' WHERE id = :a"),
+            {"a": school.fresh.account},
+        )
+        conn.execute(
+            text(
+                "INSERT INTO payment_accounts (organization_id, school_id, provider, "
+                "external_account_id, status, secret_ref, webhook_secret_hash) "
+                "VALUES (:o, :s, 'SANDBOX', :e, 'ACTIVE', 'env:T6_SECOND', :h)"
+            ),
+            {
+                "o": school.fresh.org,
+                "s": school.fresh.school,
+                "e": uuid.uuid4().hex[:12],
+                "h": hashlib.sha256(second_secret.encode()).hexdigest(),
+            },
+        )
+    # The charge was opened on the first account: the second one cannot settle it.
+    assert notify(api, txid, secret=second_secret).json() == {"status": "IGNORED"}
+    assert _charge(admin_engine, school.fresh.school) == ("PENDING", "PENDING_PAYMENT")
+
+
+def test_a_huge_body_is_refused(apis: ApiFactory, school: PublicSchool) -> None:
+    api = apis.make()
+    body = {"event_id": "e1", "txid": "a" * 32, "padding": "x" * 30000}
+    response = api.post(
+        URL, body, origin=False, csrf=False, headers={"X-Webhook-Secret": WEBHOOK_SECRET}
+    )
+    assert response.status_code == 413 and response.json()["code"] == "payload_too_large"

@@ -172,7 +172,7 @@ def renew_charge(
     slug: str, token: str, request: Request, db: Db, settings: Settings
 ) -> ContributionStateOut:
     school, ref = _open_existing(db, settings, request, slug, token)
-    state = service.renew_charge(db, school, ref)
+    state = service.renew_charge(db, settings, school, ref)
     db.commit()
     return _state_out(state)
 

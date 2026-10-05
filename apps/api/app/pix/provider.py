@@ -122,8 +122,9 @@ def sandbox_provider() -> SandboxPixProvider:
     return _SANDBOX
 
 
-def get_provider(name: str) -> PixProvider:
-    """The provider of a payment account (its `provider` column)."""
-    if name == SANDBOX:
+def get_provider(name: str, env: str) -> PixProvider:
+    """The provider of a payment account (its `provider` column). The sandbox is a fake bank that
+    lives in the memory of one process: it is never served in production."""
+    if name == SANDBOX and env != "production":
         return _SANDBOX
     raise ProblemError(501, "provider_not_configured", "This payment provider is not available yet")

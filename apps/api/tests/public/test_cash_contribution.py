@@ -102,3 +102,24 @@ def test_a_donation_goes_to_its_own_category(
             {"id": uuid.UUID(body["id"])},
         ).scalar_one()
     assert key == "donation"
+
+
+def test_the_same_idempotency_key_records_the_money_once(
+    apis: ApiFactory, users: UserFactory, world: World, admin_engine: Engine
+) -> None:
+    api, _ = _login(apis, users, "treasurer")
+    key = str(uuid.uuid4())
+    first = api.post(_url(world), {"amount_cents": 7000}, headers={"Idempotency-Key": key})
+    again = api.post(_url(world), {"amount_cents": 7000}, headers={"Idempotency-Key": key})
+    assert (first.status_code, again.status_code) == (201, 200)
+    assert again.json() == first.json()
+    conflict = api.post(_url(world), {"amount_cents": 7100}, headers={"Idempotency-Key": key})
+    assert conflict.status_code == 409 and conflict.json()["code"] == "idempotency_key_reused"
+    with admin_engine.connect() as conn:
+        count: int = conn.execute(
+            text("SELECT count(*) FROM contributions WHERE idempotency_key = :k"),
+            {"k": uuid.UUID(key)},
+        ).scalar_one()
+    assert count == 1
+    bad = api.post(_url(world), {"amount_cents": 7000}, headers={"Idempotency-Key": "nope"})
+    assert bad.status_code == 422

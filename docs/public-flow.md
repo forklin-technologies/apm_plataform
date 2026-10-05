@@ -33,6 +33,16 @@ development. The database side (the three `SECURITY DEFINER` functions, the idem
 Every public response carries `Cache-Control: private, no-store` and `Referrer-Policy: no-referrer`.
 The token is a secret of the family (256 bits, derived from the Idempotency-Key so that a replay
 answers with the same one); only its SHA-256 is stored, and the receipt link is valid for 30 days.
+**The Idempotency-Key is therefore as secret as the token**: whoever knows it can replay the POST and
+receive the token. The site must make it with `crypto.randomUUID()` for each attempt, send it only
+over HTTPS, and the proxy must not log request headers.
+
+A charge is marked `EXPIRED` only 2 minutes after its `expires_at` (EXPIRED is final, and a payment
+the provider confirms at the edge must still find it `PENDING`). A webhook event the provider could
+not confirm yet stays open (`processed_at` empty), so a retry with the same event id can settle it.
+The cash route also accepts an optional `Idempotency-Key`: a retry answers `200` with the
+contribution already recorded. The sandbox never serves production (`501` for a charge, `404` for
+its webhook).
 
 ## What the webhook does, in order
 

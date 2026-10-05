@@ -29,9 +29,13 @@ Result = Literal["PAID", "REVIEW_REQUIRED", "NOT_CONFIRMED", "IGNORED", "DUPLICA
 DIVERGENCE = "the amount received differs from the amount expected"
 
 
+MAX_PAYLOAD_BYTES = 20_000
+
+
 def process_notification(
     db: Session,
     *,
+    env: str,
     provider: str,
     target: ChargeTarget,
     event_id: str,
@@ -55,19 +59,38 @@ def process_notification(
         },
     ).scalar_one_or_none()
     if event is None:
-        return "DUPLICATE"
+        # Seen before. If that attempt reached a conclusion it is a plain duplicate; if it did not
+        # (the provider had not confirmed yet), the same event id is processed again, otherwise a
+        # retry of the provider could never settle the payment.
+        previous = db.execute(
+            text(
+                "SELECT id, processed_at FROM webhook_events WHERE school_id = :school "
+                "AND provider = :provider AND idempotency_key = :key FOR UPDATE"
+            ),
+            {"school": target.school_id, "provider": provider, "key": event_id},
+        ).one_or_none()
+        if previous is None or previous[1] is not None:
+            return "DUPLICATE"
+        event = previous[0]
 
+    # The charge must belong to the account that authenticated this notification.
     charge = db.execute(
         text(
             "SELECT id, transaction_id, status, amount_cents FROM pix_charges "
-            "WHERE school_id = :school AND provider = :provider AND txid = :txid FOR UPDATE"
+            "WHERE school_id = :school AND provider = :provider AND txid = :txid "
+            "AND payment_account_id = :account FOR UPDATE"
         ),
-        {"school": target.school_id, "provider": provider, "txid": txid},
+        {
+            "school": target.school_id,
+            "provider": provider,
+            "txid": txid,
+            "account": target.payment_account_id,
+        },
     ).one_or_none()
     if charge is None or charge[2] != "PENDING":
         return _finish(db, event, "IGNORED", "no pending charge for that txid")
 
-    payment = get_provider(provider).fetch_payment(target, txid)
+    payment = get_provider(provider, env).fetch_payment(target, txid)
     if (
         payment is None
         or payment.status != "PAID"
@@ -75,7 +98,10 @@ def process_notification(
         or payment.paid_at is None
         or payment.end_to_end_id is None
     ):
-        return _finish(db, event, "NOT_CONFIRMED", "the provider does not confirm a payment")
+        # Not conclusive: the event stays open so that a retry of the provider can settle it.
+        return _finish(
+            db, event, "NOT_CONFIRMED", "the provider does not confirm a payment", processed=False
+        )
 
     paid_at = min(payment.paid_at, datetime.now(UTC))
     expected = int(charge[3])
@@ -120,13 +146,16 @@ def process_notification(
     return _finish(db, event, "REVIEW_REQUIRED", None)
 
 
-def _finish(db: Session, event: Any, result: Result, note: str | None) -> Result:
+def _finish(
+    db: Session, event: Any, result: Result, note: str | None, *, processed: bool = True
+) -> Result:
     db.execute(
         text(
-            "UPDATE webhook_events SET processed_at = now(), attempts = attempts + 1, "
-            "processing_error = :note WHERE id = :id"
+            "UPDATE webhook_events SET "
+            "processed_at = CASE WHEN :processed THEN now() ELSE processed_at END, "
+            "attempts = attempts + 1, processing_error = :note WHERE id = :id"
         ),
-        {"id": event, "note": note},
+        {"id": event, "note": note, "processed": processed},
     )
     return result
 
@@ -153,6 +182,8 @@ router = APIRouter(prefix="/webhooks/pix", tags=["webhooks"], dependencies=[Depe
 def _receive(
     request: Request, db: Session, settings: Any, provider: str, secret: str | None, body: WebhookIn
 ) -> WebhookOut:
+    if provider == "SANDBOX" and settings.env == "production":
+        raise ProblemError(404, "not_found", "Not found")  # the fake bank does not exist there
     bind_request_context(db, actor_type="SYSTEM")
     ip = client_ip(request.client.host if request.client else None)
     keys = attempt_keys(settings.auth_secret, ip, ip)
@@ -176,14 +207,18 @@ def _receive(
         db.commit()
         raise ProblemError(401, "webhook_unauthorized", "The webhook is not authorized")
     target = ChargeTarget(row[0], row[1], row[2])
+    payload = body.model_dump()
+    if len(json.dumps(payload, default=str)) > MAX_PAYLOAD_BYTES:
+        raise ProblemError(413, "payload_too_large", "The notification is too large")
     bind_tenant(db, TenantContext(target.organization_id, target.school_id))
     result = process_notification(
         db,
+        env=settings.env,
         provider=provider,
         target=target,
         event_id=body.event_id,
         txid=body.txid,
-        payload=body.model_dump(),
+        payload=payload,
     )
     db.commit()
     return WebhookOut(status=result)
@@ -194,7 +229,9 @@ def _receive(
     operation_id="webhook_pix_sandbox",
     summary="Notification of the sandbox Pix provider",
     response_model=WebhookOut,
-    responses=problem_responses(401, 422, 429, 501),
+    responses=problem_responses(
+        401, 404, 422, 429, 501, extra={413: {"description": "payload_too_large"}}
+    ),
 )
 def sandbox(
     request: Request,
@@ -211,7 +248,9 @@ def sandbox(
     operation_id="webhook_pix_bb",
     summary="Notification of Banco do Brasil (not available until M2)",
     response_model=WebhookOut,
-    responses=problem_responses(401, 422, 429, 501),
+    responses=problem_responses(
+        401, 404, 422, 429, 501, extra={413: {"description": "payload_too_large"}}
+    ),
 )
 def banco_do_brasil(
     request: Request,

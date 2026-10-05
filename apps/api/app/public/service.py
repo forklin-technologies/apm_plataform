@@ -33,6 +33,9 @@ FIELD_NAMES = (
     "contributor_phone",
 )
 RECEIPT_DAYS = 30
+# A charge is marked EXPIRED only this long after its expiry: a payment confirmed right at the edge
+# (clock skew with the provider) must still find a PENDING charge, because EXPIRED is final.
+EXPIRY_GRACE_SECONDS = 120
 CREATIONS_PER_WINDOW = 30  # new contributions per client address
 CREATION_WINDOW_SECONDS = 15 * 60
 
@@ -140,6 +143,11 @@ def _too_many(wait: int) -> ProblemError:
 def guard_creation(db: Session, settings: ApiSettings, ip: str) -> None:
     """At most CREATIONS_PER_WINDOW new contributions per client address in the window."""
     keys = attempt_keys(settings.auth_secret, ip, ip)
+    # One request of this address at a time, so the count and the insert cannot interleave.
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 1))"),
+        {"key": "public_contribution" + keys.ip.hex()},
+    )
     row = db.execute(
         text(
             "SELECT count(*), extract(epoch FROM now() - min(attempted_at)) FROM login_attempts "
@@ -151,6 +159,8 @@ def guard_creation(db: Session, settings: ApiSettings, ip: str) -> None:
     if row[0] >= CREATIONS_PER_WINDOW:
         raise _too_many(math.ceil(CREATION_WINDOW_SECONDS - float(row[1] or 0)))
     record_attempt(db, "public_contribution", keys, succeeded=False)
+    # Committed on its own: a later 422 or 409 must not take the attempt back.
+    db.commit()
 
 
 def guard_token_guessing(db: Session, settings: ApiSettings, ip: str) -> AttemptKeys:
@@ -217,9 +227,10 @@ def _expire_old_charges(db: Session, transaction_id: uuid.UUID) -> None:
     db.execute(
         text(
             "UPDATE pix_charges SET status = 'EXPIRED', updated_at = now() "
-            "WHERE transaction_id = :tx AND status = 'PENDING' AND expires_at <= now()"
+            "WHERE transaction_id = :tx AND status = 'PENDING' "
+            "AND expires_at + make_interval(secs => :grace) <= now()"
         ),
-        {"tx": transaction_id},
+        {"tx": transaction_id, "grace": EXPIRY_GRACE_SECONDS},
     )
 
 
@@ -244,7 +255,11 @@ def read_state(db: Session, transaction_id: uuid.UUID) -> ContributionState:
 
 
 def open_charge(
-    db: Session, school: PublicSchool, transaction_id: uuid.UUID, amount_cents: int
+    db: Session,
+    settings: ApiSettings,
+    school: PublicSchool,
+    transaction_id: uuid.UUID,
+    amount_cents: int,
 ) -> None:
     """Ask the provider for a dynamic charge on the ACTIVE account of the school and record it."""
     account = db.execute(
@@ -256,7 +271,7 @@ def open_charge(
     if account is None:
         raise ProblemError(409, "payment_unavailable", "This school cannot receive Pix right now")
     txid = uuid.uuid4().hex
-    created = get_provider(account[1]).create_charge(
+    created = get_provider(account[1], settings.env).create_charge(
         ChargeTarget(school.organization_id, school.school_id, account[0]),
         txid=txid,
         amount_cents=amount_cents,
@@ -312,7 +327,7 @@ def create_contribution(
             if existing is None:
                 raise
         else:
-            open_charge(db, school, transaction_id, data.amount_cents)
+            open_charge(db, settings, school, transaction_id, data.amount_cents)
             return token, read_state(db, transaction_id)
     state = read_state(db, existing)
     if state.amount_cents != data.amount_cents:
@@ -383,16 +398,25 @@ def _insert_contribution(
     return uuid.UUID(str(transaction_id))
 
 
-def renew_charge(db: Session, school: PublicSchool, ref: ContributionRef) -> ContributionState:
+def renew_charge(
+    db: Session, settings: ApiSettings, school: PublicSchool, ref: ContributionRef
+) -> ContributionState:
     """A new charge when the previous one expired and the family still wants to pay. While a
     charge is PENDING there is only that one (no duplicated request)."""
+    # Two requests renewing at once would each ask the provider for a charge and only one row fits:
+    # the loser would leave a payable charge nobody recorded. The lock makes the second one wait
+    # and find the charge of the first.
+    db.execute(
+        text("SELECT id FROM financial_transactions WHERE id = :tx FOR UPDATE"),
+        {"tx": ref.transaction_id},
+    )
     state = read_state(db, ref.transaction_id)
     if state.status != "PENDING_PAYMENT":
         raise ProblemError(409, "contribution_closed", "This contribution is no longer waiting")
     if state.charge is not None and state.charge.status == "PENDING":
         return state
     try:
-        open_charge(db, school, ref.transaction_id, state.amount_cents)
+        open_charge(db, settings, school, ref.transaction_id, state.amount_cents)
     except IntegrityError:
         db.rollback()  # another request opened it first
     return read_state(db, ref.transaction_id)

@@ -387,3 +387,52 @@ def test_a_paid_contribution_does_not_get_a_new_charge(
     )
     assert response.status_code == 409
     assert response.json()["code"] == "contribution_closed"
+
+
+# --- review of 2026-10-05: the edge of the expiry, limits that survive a 422, production ----------
+
+
+def test_a_charge_that_just_passed_its_expiry_still_settles(
+    apis: ApiFactory, school: PublicSchool, admin_engine: Engine
+) -> None:
+    """EXPIRED is final, so a charge is only marked EXPIRED after a grace period: a payment that the
+    provider confirms right at the edge must still find it PENDING."""
+    api = apis.make()
+    created = contribute(api, school.slug, 3000)
+    token = created.json()["token"]
+    with admin_engine.begin() as conn:
+        conn.execute(text("SET LOCAL session_replication_role = replica"))
+        conn.execute(
+            text(
+                "UPDATE pix_charges SET created_at = now() - interval '1 hour', "
+                "expires_at = now() - interval '30 seconds' WHERE school_id = :s"
+            ),
+            {"s": school.fresh.school},
+        )
+    assert api.get(charge_url(school.slug, token)).json()["charge"]["status"] == "PENDING"
+    assert _pay(api, txid_of(created)).json() == {"status": "PAID"}
+
+
+def test_failed_attempts_count_against_the_limit_of_new_contributions(
+    apis: ApiFactory, school: PublicSchool
+) -> None:
+    api = apis.make()
+    statuses = [contribute(api, school.slug, 1).status_code for _ in range(31)]  # below the minimum
+    assert statuses[:30] == [422] * 30
+    assert statuses[30] == 429
+
+
+def test_the_sandbox_does_not_serve_production(apis: ApiFactory, school: PublicSchool) -> None:
+    api = apis.make()
+    app = api.client.app
+    app.state.settings = app.state.settings.model_copy(update={"env": "production"})  # type: ignore[attr-defined]
+    started = contribute(api, school.slug, 3000)
+    assert started.status_code == 501 and started.json()["code"] == "provider_not_configured"
+    hook = api.post(
+        "/api/v1/webhooks/pix/sandbox",
+        {"event_id": "e", "txid": "a" * 32},
+        origin=False,
+        csrf=False,
+        headers={"X-Webhook-Secret": "anything"},
+    )
+    assert hook.status_code == 404

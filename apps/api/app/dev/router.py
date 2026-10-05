@@ -47,6 +47,7 @@ def pay(txid: str, db: Db, settings: Settings, body: SandboxPayIn | None = None)
     bind_tenant(db, TenantContext(target.organization_id, target.school_id))
     result = process_notification(
         db,
+        env=settings.env,
         provider="SANDBOX",
         target=target,
         event_id=f"dev-{uuid.uuid4().hex}",
