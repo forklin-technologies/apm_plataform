@@ -63,15 +63,15 @@ class Fresh:
 
 
 def create_categories(conn: Connection, org: uuid.UUID, school: uuid.UUID) -> dict[str, uuid.UUID]:
-    ids: dict[str, uuid.UUID] = {}
-    for key, name, applies_to, group in DEFAULT_CATEGORIES:
-        ids[key] = conn.execute(
-            text(
-                "INSERT INTO categories (organization_id, school_id, key, name, applies_to, "
-                "report_group) VALUES (:o, :s, :k, :n, :a, :g) RETURNING id"
-            ),
-            {"o": org, "s": school, "k": key, "n": name, "a": applies_to, "g": group},
-        ).scalar_one()
+    """The default categories are installed by the trigger of the school (schools_10_settings): read
+    them back, by key."""
+    rows = conn.execute(
+        text("SELECT key, id FROM categories WHERE school_id = :s AND organization_id = :o"),
+        {"s": school, "o": org},
+    ).all()
+    ids: dict[str, uuid.UUID] = dict(rows)
+    missing = [key for key, *_ in DEFAULT_CATEGORIES if key not in ids]
+    assert not missing, f"the school was created without its default categories: {missing}"
     return ids
 
 

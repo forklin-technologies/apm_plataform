@@ -153,17 +153,26 @@ def test_the_same_settlement_in_two_transactions_settles_once(
 
 def test_a_pix_charge_confirmed_twice_is_confirmed_once(pool: Engine, school: Fresh) -> None:
     with pool.begin() as conn:
-        _, charge = add_pix_contribution(conn, school, 3000)
+        contribution, charge = add_pix_contribution(conn, school, 3000)
     e2e = end_to_end_id()
 
     def confirm(conn: Connection) -> int:
-        return conn.execute(
+        confirmed = conn.execute(
             text(
                 "UPDATE pix_charges SET status = 'PAID', end_to_end_id = :e, paid_at = now(), "
                 "received_amount_cents = amount_cents WHERE id = :c AND status = 'PENDING'"
             ),
             {"e": e2e, "c": charge},
         ).rowcount
+        if confirmed:  # the webhook settles the contribution in the same transaction
+            conn.execute(
+                text(
+                    "UPDATE financial_transactions SET status = 'PAID', settled_at = now() "
+                    "WHERE id = :t"
+                ),
+                {"t": contribution},
+            )
+        return confirmed
 
     results = run_together(pool, [confirm, confirm, confirm], hold=0.2)
 

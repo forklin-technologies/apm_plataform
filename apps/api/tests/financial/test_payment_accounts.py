@@ -79,7 +79,8 @@ def test_no_column_of_the_financial_schema_holds_a_credential(admin_engine: Engi
                 )
             )
         }
-    assert "^[a-z][a-z0-9_]{1,19}:" in definitions["ck_payment_accounts_secret_ref_format"]
+    assert "env:[A-Z]" in definitions["ck_payment_accounts_secret_ref_format"]
+    assert "vault:" in definitions["ck_payment_accounts_secret_ref_format"]
     assert "[0-9a-f]{64}" in definitions["ck_payment_accounts_webhook_secret_hash_format"]
 
 
@@ -87,9 +88,8 @@ def test_no_column_of_the_financial_schema_holds_a_credential(admin_engine: Engi
     "reference",
     [
         "env:APM_AURORA_BB",
-        "file:/run/secrets/aurora",
         "vault:kv/apm/aurora-bb",
-        "aws_sm:apm/prod/bb",
+        "vault:schools/a1/pix_bb",
     ],
 )
 def test_a_reference_to_a_secrets_manager_is_accepted(
@@ -115,6 +115,16 @@ def test_a_reference_to_a_secrets_manager_is_accepted(
         "p" * 260,
         "env:" + "x" * 201,
         "e:short-scheme-ok-but-too-short",
+        # review of 2026-10-05: no other scheme, no '..', no absolute path, no empty segment
+        "file:/run/secrets/aurora",
+        "file:../../etc/passwd",
+        "aws_sm:apm/prod/bb",
+        "env:lower_case",
+        "env:" + "A" * 101,
+        "vault:../other-school",
+        "vault:/absolute/path",
+        "vault:a//b",
+        "vault:" + "/".join(["seg"] * 9),
     ],
 )
 def test_a_literal_secret_does_not_fit_in_secret_ref(

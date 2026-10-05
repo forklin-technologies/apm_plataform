@@ -37,6 +37,7 @@ from tests.financial.support import (
     drop_school,
     end_to_end_id,
     make_school,
+    set_status,
     summary_row,
     utc,
 )
@@ -405,8 +406,9 @@ def test_the_same_id_in_another_school_is_not_a_clash(world: tuple[Connection, F
     conn, f = world
     other = make_school(conn)
     reference = end_to_end_id()
-    _, charge = add_pix_contribution(conn, other, 3000)
+    contribution, charge = add_pix_contribution(conn, other, 3000)
     confirm_charge(conn, charge, reference)
+    set_status(conn, contribution, "PAID", WHEN)  # the webhook settles both together
     add_direct_pix(conn, f, 3000, settled_at=WHEN, reference=reference)  # school f, not `other`
     check_consistency(conn)
 
@@ -463,7 +465,7 @@ def test_a_direct_pix_and_a_charge_with_the_same_id_never_both_commit(
     """The two inserters of a school take the same advisory lock, so neither misses the row of the
     other: exactly one commits, the other fails with a unique violation."""
     with pool.begin() as conn:
-        _, charge = add_pix_contribution(conn, school, 3000)
+        contribution, charge = add_pix_contribution(conn, school, 3000)
     reference = end_to_end_id()
     barrier = threading.Barrier(2)
     results: list[object] = [None, None]
@@ -473,6 +475,7 @@ def test_a_direct_pix_and_a_charge_with_the_same_id_never_both_commit(
 
     def confirm(conn: Connection) -> None:
         confirm_charge(conn, charge, reference)
+        set_status(conn, contribution, "PAID", WHEN)  # what the webhook does, in one transaction
 
     def worker(index: int, job: object, hold: float) -> None:
         import time

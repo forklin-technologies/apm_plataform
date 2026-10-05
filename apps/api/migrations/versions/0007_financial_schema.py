@@ -51,7 +51,7 @@ def _scope(org_column: str, school_column: str) -> str:
     )
 
 
-def _tenant_fks(table: str, *, school_nullable: bool = False) -> str:
+def _tenant_fks(table: str) -> str:
     return f"""
         CONSTRAINT fk_{table}_organization_id_organizations
             FOREIGN KEY (organization_id) REFERENCES organizations (id) ON DELETE RESTRICT,
@@ -534,7 +534,7 @@ def _create_details() -> None:
 
 def _create_pix_and_webhooks() -> None:
     # One receiving account per school (ACTIVE). NO credential, certificate or key is ever stored
-    # here: secret_ref is only a REFERENCE to a secrets manager ("env:NAME", "file:path", "vault:path").
+    # here: secret_ref is only a REFERENCE to a secrets manager ("env:NAME" or "vault:path").
     # webhook_secret_hash is the SHA-256 of the 128-bit secret of the webhook (a hash, like a session
     # token, not a credential): the application role cannot SELECT it; only the narrow function of
     # ADR-016 (resolve_webhook_target, TASK-006) will read it.
@@ -566,7 +566,7 @@ def _create_pix_and_webhooks() -> None:
                 CHECK (status IN ('ACTIVE', 'INACTIVE', 'PENDING')),
             -- scheme:path, so that a raw secret does not fit.
             CONSTRAINT ck_payment_accounts_secret_ref_format
-                CHECK (secret_ref ~ '^[a-z][a-z0-9_]{{1,19}}:[A-Za-z0-9_./-]{{1,200}}$'),
+                CHECK (secret_ref ~ '^(env:[A-Z][A-Z0-9_]{{0,99}}|vault:[A-Za-z0-9_-]{{1,64}}(/[A-Za-z0-9_-]{{1,64}}){{0,7}})$'),
             CONSTRAINT ck_payment_accounts_webhook_secret_hash_format
                 CHECK (webhook_secret_hash IS NULL OR webhook_secret_hash ~ '{HEX64}')
         )
@@ -1066,6 +1066,14 @@ BEGIN
         RAISE EXCEPTION '% cannot go from % to %', OLD.kind, OLD.status, NEW.status
             USING ERRCODE = 'check_violation';
     END IF;
+    IF OLD.kind = 'EXPENSE' AND OLD.status = 'APPROVED' AND NEW.status = 'CANCELLED' AND EXISTS (
+        SELECT 1 FROM public.financial_transactions c
+        WHERE c.parent_transaction_id = OLD.id AND c.kind = 'REIMBURSEMENT'
+          AND c.status IN ('PENDING', 'PAID')
+    ) THEN
+        RAISE EXCEPTION 'an expense with a live reimbursement is not cancelled: cancel the reimbursement first'
+            USING ERRCODE = 'check_violation';
+    END IF;
     IF (NEW.category_id <> OLD.category_id OR NEW.occurred_at <> OLD.occurred_at) AND NOT editable THEN
         RAISE EXCEPTION 'the purpose and the date change only while an expense is a draft or being corrected'
             USING ERRCODE = 'restrict_violation';
@@ -1114,8 +1122,9 @@ DECLARE
     approved bigint;
     available bigint;
     returned bigint;
+    root uuid;
 BEGIN
-    SELECT p.status, p.amount_cents INTO parent
+    SELECT p.status, p.amount_cents, p.parent_transaction_id INTO parent
     FROM public.financial_transactions p
     WHERE p.id = NEW.parent_transaction_id AND p.organization_id = NEW.organization_id
       AND p.school_id = NEW.school_id
@@ -1140,10 +1149,17 @@ BEGIN
         IF available IS NULL THEN
             RAISE EXCEPTION 'the expense has no approved amount' USING ERRCODE = 'check_violation';
         END IF;
+        -- One cap for the family: the returns of an expense and the returns of its reimbursements
+        -- are the same money, so they add up against the same approved amount.
+        root := CASE NEW.parent_kind WHEN 'EXPENSE' THEN NEW.parent_transaction_id
+                                     ELSE parent.parent_transaction_id END;
+        PERFORM 1 FROM public.financial_transactions x WHERE x.id = root FOR UPDATE;
         SELECT coalesce(sum(r.amount_cents), 0) INTO returned
         FROM public.financial_transactions r
-        WHERE r.parent_transaction_id = NEW.parent_transaction_id AND r.kind = 'REFUND'
-          AND r.status IN ('REQUESTED', 'AWAITING_CONFIRMATION', 'CONFIRMED');
+        WHERE r.kind = 'REFUND' AND r.status IN ('REQUESTED', 'AWAITING_CONFIRMATION', 'CONFIRMED')
+          AND (r.parent_transaction_id = root OR r.parent_transaction_id IN (
+                   SELECT c.id FROM public.financial_transactions c
+                   WHERE c.parent_transaction_id = root AND c.kind = 'REIMBURSEMENT'));
         IF returned + NEW.amount_cents > available THEN
             RAISE EXCEPTION 'returns would exceed the amount paid' USING ERRCODE = 'check_violation';
         END IF;
@@ -1299,6 +1315,14 @@ BEGIN
         IF r.status = 'PAID' AND (v_reimbursement.payment_reference IS NULL
                                   OR v_reimbursement.paid_by_user_id IS NULL) THEN
             RAISE EXCEPTION 'a PAID reimbursement records who paid it and its payment reference'
+                USING ERRCODE = 'check_violation';
+        END IF;
+        IF r.status <> 'CANCELLED' AND NOT EXISTS (
+            SELECT 1 FROM public.financial_transactions e
+            WHERE e.id = r.parent_transaction_id AND e.kind = 'EXPENSE'
+              AND e.status IN ('APPROVED', 'PAID')
+        ) THEN
+            RAISE EXCEPTION 'a live reimbursement needs an APPROVED or PAID expense'
                 USING ERRCODE = 'check_violation';
         END IF;
     ELSE
@@ -1503,6 +1527,32 @@ END
 $body$
 """
 
+FUNCTIONS["pix_charges_check_consistency"] = f"""
+CREATE FUNCTION public.pix_charges_check_consistency() RETURNS trigger {HEADER} AS $body$
+DECLARE
+    contribution_status text;
+BEGIN
+    SELECT f.status INTO contribution_status
+    FROM public.financial_transactions f
+    WHERE f.id = NEW.transaction_id AND f.organization_id = NEW.organization_id
+      AND f.school_id = NEW.school_id;
+    IF NOT FOUND THEN
+        RETURN NULL;  -- the composite foreign key refuses it, uniformly
+    END IF;
+    IF NEW.status = 'PAID' AND contribution_status <> 'PAID' THEN
+        RAISE EXCEPTION 'a PAID Pix charge needs its contribution PAID'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    IF NEW.status = 'REVIEW_REQUIRED'
+       AND contribution_status NOT IN ('REVIEW_REQUIRED', 'PAID', 'CANCELLED') THEN
+        RAISE EXCEPTION 'a Pix charge in review needs its contribution in review (or already decided)'
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NULL;
+END
+$body$
+"""
+
 FUNCTIONS["school_settings_lock_timezone"] = f"""
 CREATE FUNCTION public.school_settings_lock_timezone() RETURNS trigger {HEADER} AS $body$
 BEGIN
@@ -1519,11 +1569,36 @@ END
 $body$
 """
 
+# The default purposes of a school (the product document, plus the bank fees and the returns). The
+# keys are stable, the names are what the school sees; only bank_fees needs no approver.
+DEFAULT_CATEGORIES = (
+    ("parent_contribution", "Contribuição de pais", "IN", "CONTRIBUTIONS"),
+    ("donation", "Doações", "IN", "OTHER_INCOME"),
+    ("other_income", "Outras entradas", "IN", "OTHER_INCOME"),
+    ("apm_revenue", "Receitas da APM", "IN", "OTHER_INCOME"),
+    ("teacher_reimbursement", "Reembolso de professor", "OUT", "EXPENSES_REIMBURSEMENTS"),
+    ("director_reimbursement", "Reembolso de diretor", "OUT", "EXPENSES_REIMBURSEMENTS"),
+    ("school_supplies", "Compra de material", "OUT", "EXPENSES_REIMBURSEMENTS"),
+    ("services", "Serviços", "OUT", "EXPENSES_REIMBURSEMENTS"),
+    ("other_authorized", "Outras despesas autorizadas", "OUT", "EXPENSES_REIMBURSEMENTS"),
+    ("bank_fees", "Tarifas bancárias", "OUT", "BANK_FEES"),
+    ("refund", "Devolução", "IN", "REFUNDS"),
+)
+DEFAULT_CATEGORY_VALUES = ", ".join(
+    "(" + ", ".join(f"'{part}'" for part in row) + ")" for row in DEFAULT_CATEGORIES
+)
+
 FUNCTIONS["schools_create_settings"] = f"""
 CREATE FUNCTION public.schools_create_settings() RETURNS trigger {HEADER} AS $body$
 BEGIN
     INSERT INTO public.school_settings (school_id, organization_id)
     VALUES (NEW.id, NEW.organization_id) ON CONFLICT DO NOTHING;
+    INSERT INTO public.categories
+        (organization_id, school_id, key, name, applies_to, report_group, requires_approval)
+    SELECT NEW.organization_id, NEW.id, d.key, d.name, d.applies_to, d.report_group,
+           d.key <> 'bank_fees'
+    FROM (VALUES {DEFAULT_CATEGORY_VALUES}) AS d (key, name, applies_to, report_group)
+    ON CONFLICT DO NOTHING;
     RETURN NEW;
 END
 $body$
@@ -1984,6 +2059,7 @@ FUNCTION_ORDER = (
     "contributions_check_insert",
     "pix_charges_check_contribution",
     "pix_charges_check_end_to_end_id",
+    "pix_charges_check_consistency",
     "school_settings_lock_timezone",
     "schools_create_settings",
     "statement_entries",
@@ -2404,6 +2480,13 @@ def _create_triggers() -> None:
             "BEFORE INSERT OR UPDATE OF end_to_end_id",
             "pix_charges_check_end_to_end_id",
         ),
+        _trigger(
+            "pix_charges",
+            "pix_charges_90_consistency",
+            "AFTER INSERT OR UPDATE",
+            "pix_charges_check_consistency",
+            deferred=True,
+        ),
         immutable(
             "webhook_events",
             "id",
@@ -2823,6 +2906,13 @@ def upgrade() -> None:
     op.execute(
         "INSERT INTO school_settings (school_id, organization_id) "
         "SELECT id, organization_id FROM schools ON CONFLICT DO NOTHING"
+    )
+    op.execute(
+        "INSERT INTO categories (organization_id, school_id, key, name, applies_to, report_group, "
+        "requires_approval) SELECT s.organization_id, s.id, d.key, d.name, d.applies_to, "
+        "d.report_group, d.key <> 'bank_fees' "
+        f"FROM schools s CROSS JOIN (VALUES {DEFAULT_CATEGORY_VALUES}) "
+        "AS d (key, name, applies_to, report_group) ON CONFLICT DO NOTHING"
     )
 
 

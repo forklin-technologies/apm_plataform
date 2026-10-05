@@ -9,6 +9,7 @@ from sqlalchemy.exc import DBAPIError, ProgrammingError
 from app.core.config import AdminSettings
 from app.db.tenant import TenantContext
 from tests.dbsupport import Tenants, transaction
+from tests.financial.test_isolation import TABLES as FINANCIAL_TABLES
 
 TABLES = ["organizations", "schools", "users", "memberships"]
 AUTH_TABLES = ["sessions", "login_attempts", "invitations"]
@@ -231,7 +232,7 @@ FINANCIAL_TRIGGER_FUNCTIONS = (
     "expenses_set_decision_time", "forbid_delete", "forbid_truncate", "forbid_update",
     "freeze_when_final", "ft_assign_reference_code", "ft_check_change", "ft_check_consistency",
     "ft_check_initial", "ft_check_relations", "ft_settle", "monthly_closings_reopen",
-    "monthly_closings_snapshot", "pix_charges_check_contribution",
+    "monthly_closings_snapshot", "pix_charges_check_consistency", "pix_charges_check_contribution",
     "pix_charges_check_end_to_end_id", "school_settings_lock_timezone", "schools_create_settings",
 )  # fmt: skip
 FUNCTIONS.update(
@@ -523,9 +524,11 @@ def test_application_role_table_privileges_are_exactly_these(admin_engine: Engin
             text(
                 "SELECT table_name, privilege_type FROM information_schema.table_privileges "
                 "WHERE grantee = 'apm_app' AND table_schema = 'public' "
-                "AND table_name = ANY(:tables) ORDER BY 1, 2"
+                "AND table_name <> ALL(:financial) ORDER BY 1, 2"
             ),
-            {"tables": list(ALL_COLUMNS)},
+            # Every other table of the schema is still closed: the 13 financial tables (0007) have
+            # their grants asserted column by column in tests/financial/test_grants.py.
+            {"financial": list(FINANCIAL_TABLES)},
         ).all()
 
     assert {tuple(row) for row in rows} == {

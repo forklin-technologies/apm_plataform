@@ -26,7 +26,9 @@ def test_the_seed_writes_categories_and_demonstration_movements_and_repeats_clea
             admin.begin() as connection
         ):  # a new transaction: the consistency checks ran at the first commit
             second = seed(connection)
-        assert first.created["categories"] == 3 * len(DEFAULT_CATEGORIES)
+        # The trigger of the school installed the categories when seed() created the schools, so
+        # this step adds none; the rows themselves are checked below.
+        assert first.created["categories"] == 0
         assert first.created["financial_transactions"] == 3 * MOVEMENTS_PER_SCHOOL
         assert set(second.created.values()) == {0}  # repeatable
 

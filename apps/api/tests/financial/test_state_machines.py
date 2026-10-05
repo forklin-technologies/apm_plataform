@@ -212,11 +212,8 @@ def test_the_value_the_purpose_and_the_date_change_only_in_draft_or_correction(
     params = {"t": tx, "other": f.cat_out}  # an OUT category of the same school
     # Move to another category for the category case so that the value really changes.
     other: uuid.UUID = conn.execute(
-        text(
-            "INSERT INTO categories (organization_id, school_id, key, name, applies_to, report_group) "
-            "VALUES (:o, :s, 'services', 'Serviços', 'OUT', 'EXPENSES_REIMBURSEMENTS') RETURNING id"
-        ),
-        {"o": f.org, "s": f.school},
+        text("SELECT id FROM categories WHERE school_id = :s AND key = 'services'"),
+        {"s": f.school},
     ).scalar_one()
     params["other"] = other
 

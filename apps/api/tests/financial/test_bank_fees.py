@@ -426,13 +426,10 @@ def test_the_application_role_records_and_settles_a_fee_under_row_level_security
     database, not the caller, fills in the approved amount."""
     school_context = TenantContext(tenants.org_a, tenants.school_a1)
     with transaction(app_engine, context=school_context) as conn:
+        # The category of the bank fees is installed with the school (schools_10_settings).
         category: Any = conn.execute(
-            text(
-                "INSERT INTO categories (organization_id, school_id, key, name, applies_to, report_group, "
-                "requires_approval) VALUES (:o, :s, 'bank_fees', 'Tarifas bancárias', 'OUT', 'BANK_FEES', false) "
-                "RETURNING id"
-            ),
-            {"o": tenants.org_a, "s": tenants.school_a1},
+            text("SELECT id FROM categories WHERE school_id = :s AND key = 'bank_fees'"),
+            {"s": tenants.school_a1},
         ).scalar_one()
         conn.execute(
             text("SELECT set_config('app.user_id', :u, true)"), {"u": str(tenants.user_a1)}
@@ -498,7 +495,10 @@ def test_the_application_role_cannot_make_another_category_go_without_approval(
         conn.execute(insert, {**scope, "k": "other_fees", "r": False})
 
     with transaction(app_engine, context=school_context) as conn:
-        allowed: Any = conn.execute(insert, {**scope, "k": "bank_fees", "r": False}).scalar_one()
+        allowed: Any = conn.execute(
+            text("SELECT id FROM categories WHERE school_id = :s AND key = 'bank_fees'"),
+            {"s": tenants.school_a1},
+        ).scalar_one()  # installed with the school, and the only one that may go without approval
         normal: Any = conn.execute(insert, {**scope, "k": "other_fees", "r": True}).scalar_one()
         for category, value in ((allowed, "true"), (normal, "false")):
             with pytest.raises(DBAPIError, match="permission denied"), conn.begin_nested():

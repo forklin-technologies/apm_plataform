@@ -46,7 +46,7 @@ EXPECTED_TABLES = {
 EXPECTED_POLICIES = 30 + 37
 # 7 of TASK-003 and 0006 (app_org, app_school, app_session_id, app_user_id + the 3 SECURITY
 # DEFINER) + 35 financial functions (all SECURITY INVOKER, see test_financial_triggers)
-EXPECTED_FUNCTIONS = 7 + 35
+EXPECTED_FUNCTIONS = 7 + 36
 EXPECTED_CATALOG = {
     "tables": EXPECTED_TABLES,
     "policies": EXPECTED_POLICIES,

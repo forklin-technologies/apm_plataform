@@ -89,6 +89,9 @@ EXPECTED_TRIGGERS: dict[tuple[str, str], Trigger] = {
     ("pix_charges", "pix_charges_20_end_to_end_id"): _t(
         B, {INS, UPD}, "pix_charges_check_end_to_end_id"
     ),
+    ("pix_charges", "pix_charges_90_consistency"): _t(
+        A, {INS, UPD}, "pix_charges_check_consistency"
+    ),
     ("webhook_events", "webhook_events_05_immutable"): _t(B, {UPD}, "assert_immutable_columns"),
     ("webhook_events", "webhook_events_10_set_once"): _t(B, {UPD}, "assert_set_once_columns"),
     ("audit_logs", "audit_logs_05_actor"): _t(B, {INS}, "audit_logs_fill_actor"),
@@ -182,7 +185,7 @@ EXPECTED_FUNCTIONS = {
     "freeze_when_final", "ft_assign_reference_code", "ft_check_consistency",
     "ft_check_relations", "ft_settle", "monthly_closings_reopen", "monthly_closings_snapshot",
     "pix_charges_check_contribution", "school_settings_lock_timezone", "schools_create_settings",
-    "contributions_check_insert", "expenses_apply_approval_waiver", "pix_charges_check_end_to_end_id",
+    "pix_charges_check_consistency", "contributions_check_insert", "expenses_apply_approval_waiver", "pix_charges_check_end_to_end_id",
     "statement_entries", "statement_pending", "statement_summary", "verify_closing",
     # tenancy and authentication (0003 to 0006): the context functions and the closed list of ADR-016
     "app_session_id", "app_user_id", "accept_invitation", "find_login_identity",
@@ -226,7 +229,10 @@ def test_every_expected_trigger_exists_and_nothing_else(admin_engine: Engine) ->
     assert {key: value[0] for key, value in found.items()} == EXPECTED_TRIGGERS
     assert {key for key, value in found.items() if value[2] != "O"} == set()  # all enabled
     deferred = {key for key, value in found.items() if value[1]}
-    assert deferred == {("financial_transactions", "ft_90_consistency")}
+    assert deferred == {
+        ("financial_transactions", "ft_90_consistency"),
+        ("pix_charges", "pix_charges_90_consistency"),
+    }
 
 
 def test_the_triggers_fire_in_the_order_the_model_needs(admin_engine: Engine) -> None:

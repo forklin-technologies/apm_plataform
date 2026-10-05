@@ -41,7 +41,7 @@ EXPECTED_TABLES = {
 EXPECTED_POLICIES = 30 + 37
 # 7 functions of the tenancy core and of 0006 (app_org, app_school, app_session_id, app_user_id and
 # the 3 SECURITY DEFINER) plus the 35 functions of revision 0007.
-EXPECTED_FUNCTIONS = 7 + 35
+EXPECTED_FUNCTIONS = 7 + 36
 CREATED_ROLES = ("apm_app", "apm_owner", "apm_definer")
 
 
