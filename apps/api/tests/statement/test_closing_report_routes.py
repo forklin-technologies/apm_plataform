@@ -75,7 +75,8 @@ def test_the_pdf_of_march_has_the_summary_the_sections_and_the_signatures(
         "Subtotal de saídas (2) R$ 60,00",
         "Subtotal de devoluções (1) R$ 5,00",
         "Subtotal de tarifas (1) R$ 3,50",
-        "Total pendente (1) R$ 15,00",
+        "Subtotal a pagar (1) R$ 15,00",
+        "Subtotal a receber (0) R$ 0,00",
     ):
         assert subtotal in everything, subtotal
     # the lines
@@ -235,3 +236,46 @@ def test_the_same_closing_gives_the_same_pdf_but_for_the_time_it_was_made(
         return [page.split("Gerado em")[0] for page in pages_of(content)]
 
     assert before_generated(first) == before_generated(second)
+
+
+def test_the_pending_section_adds_what_is_to_receive_apart_from_what_is_to_pay(
+    scene: Scene, login: Login, admin_engine: Engine
+) -> None:
+    from tests.financial.support import add_pix_contribution, check_consistency
+
+    created = close_march(login, scene)
+    with admin_engine.begin() as conn:  # a Pix waiting for payment: money still to RECEIVE (IN)
+        add_pix_contribution(conn, scene.fresh, 2500)
+        check_consistency(conn)
+
+    everything = text_of(
+        login(scene.users["treasurer"]).get(report_path(scene, created["id"])).content
+    )
+
+    assert "E. Pendências (fora do saldo): a receber" in everything
+    assert "E. Pendências (fora do saldo): a pagar" in everything
+    assert "Subtotal a receber (1) R$ 25,00" in everything  # the Pix, IN
+    assert "Subtotal a pagar (1) R$ 15,00" in everything  # the reimbursement, OUT
+    assert "Total pendente" not in everything  # no single total over both directions
+    pending_section = everything.split("E. Pendências")[1].split("Conferência")[0]
+    assert "R$ 40,00" not in pending_section  # not their sum, 25 + 15
+    assert "R$ 10,00" not in pending_section  # nor their difference
+
+
+def test_the_viewer_never_gets_the_free_text_of_a_line_but_management_does(
+    scene: Scene, login: Login
+) -> None:
+    created = close_march(login, scene)
+    seen_by_viewer = text_of(
+        login(scene.users["viewer"]).get(report_path(scene, created["id"])).content
+    )
+    seen_by_management = text_of(
+        login(scene.users["treasurer"]).get(report_path(scene, created["id"])).content
+    )
+
+    for free_text in ("Zélia", "Pintora", "Material de pintura", "Rosa", "Tabajara", "devolvido"):
+        assert free_text not in seen_by_viewer, free_text
+    assert "Compra de material" in seen_by_viewer  # the category stays, and so does the amount
+    assert "R$ 20,00" in seen_by_viewer
+    assert "Material de pintura comprado por Zélia Pintora" in seen_by_management
+    assert "devolvido pela professora Rosa Tabajara" in seen_by_management

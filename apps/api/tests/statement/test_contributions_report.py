@@ -79,7 +79,7 @@ def test_the_pdf_of_march_has_the_header_the_summary_and_the_lists(
         "Doador Generoso",
     ):
         assert line in everything, line
-    assert "Aluno Um | 5º A" in everything
+    assert "Aluno Um | 5º A (Profa Marta)" in everything
     assert "Contribuinte anônimo" in everything  # the Pix of the platform came with no name
     for channel in ("Pix pela plataforma", "Pix direto na conta", "Dinheiro", "Transferência"):
         assert channel in everything
@@ -206,7 +206,7 @@ def test_the_viewer_gets_initials_instead_of_names(contrib_scene: Scene, login: 
     for initials in ("M. E.", "J. T.", "C. T.", "P. Q.", "A. Q.", "D. G.", "A. U."):
         assert initials in everything, initials
     assert "Contribuinte anônimo" in everything
-    assert "5º A" in everything  # a class is not a person
+    assert "5º A" not in everything and "Marta" not in everything  # the class is free text
     assert "Versão sem dados pessoais" in everything
     assert "Subtotal (6) R$ 155,00" in everything  # the same figures
 

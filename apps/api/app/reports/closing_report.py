@@ -102,6 +102,7 @@ class Line:
 @dataclass(frozen=True)
 class PendingLine:
     reference_code: int
+    direction: str  # IN: to receive; OUT: to pay. The two are never added together.
     occurred_at: datetime
     kind_label: str
     section_label: str
@@ -148,7 +149,9 @@ def _line(entry: dict[str, Any], names: dict[str, str], personal_data: bool) -> 
         when=entry["settled_at"],
         who=_who(entry, personal_data),
         type_label=ORIGIN_LABELS.get(entry["origin_type"], "outro"),
-        description=str(entry["description"] or ""),
+        # Free text (the description of an expense, the reason of a return) may hold a name: only
+        # management gets it. Everyone else gets the category and the amount.
+        description=str(entry["description"] or "") if personal_data else "",
         category=names.get(entry["category_key"], entry["category_key"]),
         status=STATUS_LABELS.get(entry["status_label"], entry["status_label"]),
         amount_cents=entry["amount_cents"],
@@ -223,6 +226,7 @@ def build_closing_report(
         pending=[
             PendingLine(
                 reference_code=row["reference_code"],
+                direction=row["direction"],
                 occurred_at=row["occurred_at"],
                 kind_label=KIND_LABELS.get(row["kind"], row["kind"]),
                 section_label=SECTION_LABELS.get(row["section"], row["section"]),
@@ -462,30 +466,37 @@ def _details(report: ClosingReport) -> list[Flowable]:
         Column("Situação", 38),
         _AMOUNT,
     ]
-    pending_rows = [
-        [
-            local_datetime(line.occurred_at, report.timezone),
-            reference(line.reference_code),
-            line.kind_label,
-            line.section_label,
-            brl(line.amount_cents),
-        ]
-        for line in report.pending
-    ]
-    story.extend(
-        section(
-            "E. Pendências (fora do saldo)",
-            pending_columns,
-            pending_rows,
-            subtotal_label="Total pendente",
-            count=len(report.pending),
-            total_cents=sum(line.amount_cents for line in report.pending),
-            note=(
-                "Posição na data de geração deste documento. O quadro da primeira página mostra os "
-                "reembolsos pendentes na data do fechamento. Nada desta seção entra no saldo."
-            ),
-        )
+    note = (
+        "Posição na data de geração deste documento. O quadro da primeira página mostra os "
+        "reembolsos pendentes na data do fechamento. Nada desta seção entra no saldo. O que há "
+        "a receber e o que há a pagar são somados à parte, nunca um com o outro."
     )
+    for direction, title, label in (
+        ("IN", "E. Pendências (fora do saldo): a receber", "Subtotal a receber"),
+        ("OUT", "E. Pendências (fora do saldo): a pagar", "Subtotal a pagar"),
+    ):
+        pending_lines = [line for line in report.pending if line.direction == direction]
+        story.extend(
+            section(
+                title,
+                pending_columns,
+                [
+                    [
+                        local_datetime(line.occurred_at, report.timezone),
+                        reference(line.reference_code),
+                        line.kind_label,
+                        line.section_label,
+                        brl(line.amount_cents),
+                    ]
+                    for line in pending_lines
+                ],
+                subtotal_label=label,
+                count=len(pending_lines),
+                total_cents=sum(line.amount_cents for line in pending_lines),
+                note=note if direction == "IN" else None,
+                empty_text="Nada pendente.",
+            )
+        )
 
     story.append(para("Conferência das seções com o quadro do período", "h2"))
     story.append(

@@ -132,7 +132,7 @@ def build_march(conn: Connection, f: Fresh) -> dict[str, uuid.UUID]:
         status="PAID",
         settled_at=utc(2025, 3, 10, 12),
         occurred_at=utc(2025, 3, 10, 12),
-        description="Material de pintura",
+        description="Material de pintura comprado por Zélia Pintora",
     )
     e["collab"], e["reimbursement"] = add_collaborator_expense(
         conn,
@@ -143,7 +143,14 @@ def build_march(conn: Connection, f: Fresh) -> dict[str, uuid.UUID]:
         description="Tinta",
     )
     e["fee"] = add_bank_fee(conn, f, 350, settled_at=utc(2025, 3, 15, 12))
-    e["refund"] = add_refund(conn, f, 500, status="CONFIRMED", settled_at=utc(2025, 3, 20, 12))
+    e["refund"] = add_refund(
+        conn,
+        f,
+        500,
+        status="CONFIRMED",
+        settled_at=utc(2025, 3, 20, 12),
+        reason="devolvido pela professora Rosa Tabajara",
+    )
     # Outside the balance of March:
     e["pending_collab"], e["pending_reimbursement"] = add_collaborator_expense(
         conn, f, 1500, occurred_at=utc(2025, 3, 25, 12), description="Cola"
@@ -246,7 +253,7 @@ def build_contributions(conn: Connection, f: Fresh) -> dict[str, uuid.UUID]:
         utc(2025, 3, 3, 12),
         guardian="Maria Exemplo",
         student="Aluno Um",
-        class_name="5º A",
+        class_name="5º A (Profa Marta)",
     )
     e["direct"] = add_direct_pix(
         conn, f, 3000, settled_at=utc(2025, 3, 4, 12), guardian="João Teste"

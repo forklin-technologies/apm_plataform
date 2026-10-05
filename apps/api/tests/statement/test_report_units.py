@@ -228,3 +228,45 @@ def test_a_large_period_runs_over_many_pages_with_the_page_count_and_the_code_on
         assert "ab" * 32 in page
     assert "Tesoureiro" in pages[-1]
     assert "Subtotal de entradas (300) R$ 300,00" in " ".join(pages)
+
+
+def test_free_text_reaches_the_pdf_only_for_management() -> None:
+    entries = ledger()
+    entries[2] = entry(
+        3, "EXPENSE", "EXPENSES_REIMBURSEMENTS", 200, origin_type="TEACHER",
+        description="Tinta que a Zélia Pintora comprou",
+    )  # fmt: skip
+    entries[5] = entry(
+        6,
+        "REFUND",
+        "REFUNDS",
+        50,
+        status_label="CONFIRMED",
+        description="devolvido por Rosa Tabajara",
+    )
+
+    for_management = text_of(render_closing_report(build(entries=entries, personal_data=True)))
+    for_viewer = text_of(render_closing_report(build(entries=entries, personal_data=False)))
+
+    assert "Zélia Pintora" in for_management and "Rosa Tabajara" in for_management
+    for word in ("Zélia", "Pintora", "Rosa", "Tabajara", "Tinta", "devolvido"):
+        assert word not in for_viewer, word
+    assert "Categoria" in for_viewer  # the category stays
+
+
+def test_the_pending_lines_keep_their_direction_and_are_never_added_across_it() -> None:
+    pending = [
+        {"reference_code": 9, "direction": "OUT", "occurred_at": AT, "kind": "REIMBURSEMENT",
+         "section": "PAYABLE", "amount_cents": 150},
+        {"reference_code": 10, "direction": "IN", "occurred_at": AT, "kind": "CONTRIBUTION",
+         "section": "RECEIVABLE", "amount_cents": 2500},
+        {"reference_code": 11, "direction": "OUT", "occurred_at": AT, "kind": "EXPENSE",
+         "section": "AWAITING_APPROVAL", "amount_cents": 50},
+    ]  # fmt: skip
+    report = build(pending=pending)
+
+    assert [line.direction for line in report.pending] == ["OUT", "IN", "OUT"]
+    everything = text_of(render_closing_report(report))
+    assert "Subtotal a receber (1) R$ 25,00" in everything
+    assert "Subtotal a pagar (2) R$ 2,00" in everything
+    assert "R$ 27,00" not in everything

@@ -95,7 +95,8 @@ def _contribution(row: dict[str, Any], personal_data: bool, *, settled: bool) ->
         when=row["settled_at"] if settled else row["occurred_at"],
         guardian=_person(row["guardian_name"], personal_data) or ANONYMOUS,
         student=_person(row["student_name"], personal_data),
-        class_name=row["class_name"] or "",
+        # The class is typed by the guardian: free text, so only management gets it.
+        class_name=(row["class_name"] or "") if personal_data else "",
         channel=CHANNEL_LABELS.get(row["method"], "Outro"),
         pix_id=short_id(row["pix_id"]),
         amount_cents=row["amount_cents"],
