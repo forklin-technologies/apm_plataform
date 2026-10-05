@@ -9,6 +9,7 @@ from sqlalchemy.exc import DBAPIError, ProgrammingError
 from app.core.config import AdminSettings
 from app.db.tenant import TenantContext
 from tests.dbsupport import Tenants, transaction
+from tests.financial.test_isolation import TABLES as FINANCIAL_TABLES
 
 TABLES = ["organizations", "schools", "users", "memberships"]
 AUTH_TABLES = ["sessions", "login_attempts", "invitations"]
@@ -210,6 +211,54 @@ FUNCTIONS = {
         for name in ("app_org", "app_school", "app_session_id", "app_user_id")
     },
 }
+# The financial schema (0007, ADR-015): 35 functions, none of them SECURITY DEFINER, all owned by
+# apm_owner with a fixed search_path. The 7 that the application calls (the statement, the pending
+# list, the consolidated view and the closing checks) are STABLE with EXECUTE for apm_app; the 28
+# trigger functions are VOLATILE and executable by no role but the owner.
+FINANCIAL_CALLABLE_FUNCTIONS = (
+    "statement_entries(uuid,date,date,text,uuid,text,uuid)",
+    "statement_summary(uuid,date,date)",
+    "org_statement_summary(uuid,date,date)",
+    "statement_pending(uuid)",
+    "closing_entries_hash(uuid,date,date)",
+    "closing_breakdown(uuid,date,date)",
+    "verify_closing(uuid)",
+)
+FINANCIAL_TRIGGER_FUNCTIONS = (
+    "assert_active_member", "assert_anonymize_only", "assert_immutable_columns",
+    "assert_set_once_columns", "audit_logs_fill_actor", "audit_row_change",
+    "contributions_check_insert", "contributions_check_review", "expense_attachments_check_state",
+    "expenses_apply_approval_waiver", "expenses_edit_only_when_editable",
+    "expenses_set_decision_time", "forbid_delete", "forbid_truncate", "forbid_update",
+    "freeze_when_final", "ft_assign_reference_code", "ft_check_change", "ft_check_consistency",
+    "ft_check_initial", "ft_check_relations", "ft_settle", "monthly_closings_reopen",
+    "monthly_closings_snapshot", "pix_charges_check_consistency", "pix_charges_check_contribution",
+    "pix_charges_check_end_to_end_id", "school_settings_lock_timezone", "schools_create_settings",
+)  # fmt: skip
+FUNCTIONS.update(
+    {
+        signature: (
+            "apm_owner",
+            False,
+            ["search_path=pg_catalog"],
+            {"apm_owner=X/apm_owner", "apm_app=X/apm_owner"},
+            "s",
+        )
+        for signature in FINANCIAL_CALLABLE_FUNCTIONS
+    }
+)
+FUNCTIONS.update(
+    {
+        f"{name}()": (
+            "apm_owner",
+            False,
+            ["search_path=pg_catalog"],
+            {"apm_owner=X/apm_owner"},
+            "v",
+        )
+        for name in FINANCIAL_TRIGGER_FUNCTIONS
+    }
+)
 # table.policy for every permissive policy that applies to apm_definer (TO apm_definer).
 DEFINER_POLICIES = {
     "invitations.invitations_definer_select",
@@ -324,7 +373,11 @@ def test_context_functions_are_stable_invoker_with_a_fixed_search_path(
             )
         ).all()
 
-    assert [row[0] for row in rows] == ["app_org", "app_school", "app_session_id", "app_user_id"]
+    # The financial functions of 0007 are covered by tests/financial/test_triggers.py: here, the
+    # context functions of the tenancy core and of the authentication (0006).
+    context = ("app_org", "app_school", "app_session_id", "app_user_id")
+    rows = [row for row in rows if row[0] in context]
+    assert [row[0] for row in rows] == list(context)
     for _name, volatility, security_definer, config, owner in rows:
         assert volatility == "s"  # STABLE
         assert security_definer is False
@@ -350,7 +403,8 @@ def test_there_is_no_system_mode_and_the_open_policies_are_the_closed_list_of_ap
             )
         ).all()
 
-    assert len(policies) == 30
+    # 30 of TASK-003 and 0006 + 37 of the financial schema (0007)
+    assert len(policies) == 30 + 37
     open_ones = set()
     for name, qual, check, roles in policies:
         if qual.strip().lower() == "true" or check.strip().lower() == "true":
@@ -469,8 +523,12 @@ def test_application_role_table_privileges_are_exactly_these(admin_engine: Engin
         rows = connection.execute(
             text(
                 "SELECT table_name, privilege_type FROM information_schema.table_privileges "
-                "WHERE grantee = 'apm_app' AND table_schema = 'public' ORDER BY 1, 2"
-            )
+                "WHERE grantee = 'apm_app' AND table_schema = 'public' "
+                "AND table_name <> ALL(:financial) ORDER BY 1, 2"
+            ),
+            # Every other table of the schema is still closed: the 13 financial tables (0007) have
+            # their grants asserted column by column in tests/financial/test_grants.py.
+            {"financial": list(FINANCIAL_TABLES)},
         ).all()
 
     assert {tuple(row) for row in rows} == {

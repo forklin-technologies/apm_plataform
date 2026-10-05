@@ -20,6 +20,7 @@ from typing import Any
 from sqlalchemy import Connection, create_engine, text
 
 from app.auth.passwords import MIN_LENGTH, hash_password
+from app.seed_financial import seed_financial
 
 PRODUCTION_REFUSAL = "refusing to seed: ENV=production. The seed is for development only."
 FAKE_EMAIL_DOMAIN = "example.test"
@@ -120,6 +121,7 @@ def seed(connection: Connection, password: str | None = None) -> SeedSummary:
             {"email": email, "org_slug": org_slug, "school_slug": school_slug, "role": role},
         )
         count("memberships", result.rowcount)
+    seed_financial(connection, count)  # categories and demonstration movements (ADR-015)
     return summary
 
 

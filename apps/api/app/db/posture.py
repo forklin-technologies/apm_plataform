@@ -15,8 +15,26 @@ from sqlalchemy import Connection, text
 from app.core.config import APP_DB_ROLE
 
 TENANT_TABLES = ("organizations", "schools", "users", "memberships")
-# Every table with row level security: the tenant tables plus the authentication tables.
-RLS_TABLES = (*TENANT_TABLES, "sessions", "login_attempts", "invitations")
+# The tables of the financial schema (0007, ADR-015). All of them belong to an organization and a
+# school and carry row level security like the tenant tables.
+FINANCIAL_TABLES = (
+    "categories",
+    "school_settings",
+    "financial_transactions",
+    "contributions",
+    "expenses",
+    "reimbursements",
+    "refunds",
+    "expense_attachments",
+    "payment_accounts",
+    "pix_charges",
+    "webhook_events",
+    "audit_logs",
+    "monthly_closings",
+)
+# Every table with row level security: the tenant tables, the authentication tables and the
+# financial ones.
+RLS_TABLES = (*TENANT_TABLES, "sessions", "login_attempts", "invitations", *FINANCIAL_TABLES)
 DEFINER_ROLE = "apm_definer"
 
 # Who owns the tenant tables.
@@ -60,11 +78,24 @@ EXPECTED_POLICIES: frozenset[tuple[str, str, str, str]] = frozenset(
         ("schools", "schools_definer_select", "SELECT", "apm_definer"),
         ("invitations", "invitations_definer_select", "SELECT", "apm_definer"),
         ("invitations", "invitations_definer_update", "UPDATE", "apm_definer"),
+        # 0007: a SELECT and an INSERT policy on each financial table, and an UPDATE one on every
+        # table but the two that only grow (expense_attachments, audit_logs): 37. None of them is
+        # open to apm_definer: the financial schema has no SECURITY DEFINER function.
+        *(
+            (table, f"{table}_{command.lower()}", command, "public")
+            for table in FINANCIAL_TABLES
+            for command in (
+                ("SELECT", "INSERT")
+                if table in ("expense_attachments", "audit_logs")
+                else ("SELECT", "INSERT", "UPDATE")
+            )
+        ),
     }
 )
 
 # The SECURITY DEFINER functions that may exist, as `schema.name(argument types)`. The list is
-# closed on purpose: the three of TASK-004 (ADR-016); the financial tasks add theirs by an ADR.
+# closed on purpose: the three of TASK-004 (ADR-016); the financial schema (0007) has none, and a
+# later task adds its own by an ADR.
 ALLOWED_SECURITY_DEFINER: frozenset[str] = frozenset(
     {
         "public.find_login_identity(p_email text)",

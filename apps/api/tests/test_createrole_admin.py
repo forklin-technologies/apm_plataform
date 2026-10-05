@@ -20,6 +20,7 @@ from sqlalchemy.engine import make_url
 
 from app.db.posture import check_posture
 from tests.dbsupport import ScratchDb, run_alembic
+from tests.financial.test_isolation import TABLES as FINANCIAL_TABLES
 
 CI_ADMIN = "apm_ci_admin"
 DATABASE = "apm_h1"
@@ -32,9 +33,15 @@ EXPECTED_TABLES = {
     "schools",
     "sessions",
     "users",
+    *FINANCIAL_TABLES,
 }
-EXPECTED_POLICIES = 30
-EXPECTED_FUNCTIONS = 7
+# 30 policies of the tenancy core and of 0006, plus one SELECT, one INSERT and (where a column can
+# be updated) one UPDATE policy on each of the 13 financial tables: 37, audit_logs and
+# expense_attachments having no UPDATE.
+EXPECTED_POLICIES = 30 + 37
+# 7 functions of the tenancy core and of 0006 (app_org, app_school, app_session_id, app_user_id and
+# the 3 SECURITY DEFINER) plus the 35 functions of revision 0007.
+EXPECTED_FUNCTIONS = 7 + 36
 CREATED_ROLES = ("apm_app", "apm_owner", "apm_definer")
 
 

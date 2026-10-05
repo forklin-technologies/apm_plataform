@@ -16,6 +16,21 @@ from app.core.config import AdminSettings
 from app.db.base import Base
 from tests.dbsupport import API_DIR, ScratchDb, run_alembic
 
+FINANCIAL_TABLES = {
+    "audit_logs",
+    "categories",
+    "contributions",
+    "expense_attachments",
+    "expenses",
+    "financial_transactions",
+    "monthly_closings",
+    "payment_accounts",
+    "pix_charges",
+    "refunds",
+    "reimbursements",
+    "school_settings",
+    "webhook_events",
+}
 EXPECTED_TABLES = {
     "alembic_version",
     "invitations",
@@ -25,10 +40,13 @@ EXPECTED_TABLES = {
     "schools",
     "sessions",
     "users",
-}
-# 11 of TASK-003 + those of 0006 (sessions, login_attempts, invitations, users self, apm_definer)
-EXPECTED_POLICIES = 30
-EXPECTED_FUNCTIONS = 7  # app_org, app_school, app_session_id, app_user_id + the 3 SECURITY DEFINER
+} | FINANCIAL_TABLES
+# 30 of TASK-003 and 0006 (sessions, login_attempts, invitations, users self, apm_definer) + 37 of
+# the financial schema (13 select, 13 insert, 11 update)
+EXPECTED_POLICIES = 30 + 37
+# 7 of TASK-003 and 0006 (app_org, app_school, app_session_id, app_user_id + the 3 SECURITY
+# DEFINER) + 35 financial functions (all SECURITY INVOKER, see test_financial_triggers)
+EXPECTED_FUNCTIONS = 7 + 36
 EXPECTED_CATALOG = {
     "tables": EXPECTED_TABLES,
     "policies": EXPECTED_POLICIES,
@@ -83,13 +101,9 @@ def test_upgrade_from_an_empty_database_creates_everything(scratch_db: ScratchDb
     result = run_alembic(scratch_db, "upgrade", "head")
 
     assert result.returncode == 0, result.stderr
-    assert _catalog(scratch_db) == {
-        "tables": EXPECTED_TABLES,
-        "policies": EXPECTED_POLICIES,
-        "functions": EXPECTED_FUNCTIONS,
-    }
+    assert _catalog(scratch_db) == EXPECTED_CATALOG
     current = run_alembic(scratch_db, "current")
-    assert "0006_auth_sessions (head)" in current.stdout + current.stderr
+    assert "0007_financial_schema (head)" in current.stdout + current.stderr
     admin = _admin_engine(scratch_db)
     try:
         assert _role(admin, "apm_app") == (False, False, True, False, False)
@@ -141,11 +155,7 @@ def test_upgrade_is_idempotent_and_repeatable(scratch_db: ScratchDb) -> None:
     result = run_alembic(scratch_db, "upgrade", "head")
 
     assert result.returncode == 0, result.stderr
-    assert _catalog(scratch_db) == {
-        "tables": EXPECTED_TABLES,
-        "policies": EXPECTED_POLICIES,
-        "functions": EXPECTED_FUNCTIONS,
-    }
+    assert _catalog(scratch_db) == EXPECTED_CATALOG
 
 
 def test_upgrade_repairs_a_tampered_application_role(scratch_db: ScratchDb) -> None:

@@ -27,6 +27,7 @@ from app.auth.passwords import hash_password
 from app.auth.tokens import keyed_digest
 from app.core.config import ApiSettings
 from app.main import create_app
+from tests.dbsupport import purge_financial
 from tests.helpers import TEST_AUTH_SECRET, TEST_ORIGIN, make_settings
 
 PASSWORD = "correct horse battery staple"  # noqa: S105  (fake, tests only)
@@ -145,6 +146,7 @@ def create_world(connection: Any) -> World:
 def delete_world(connection: Any, world: World, secret: SecretStr) -> None:
     pattern = f"t4-{world.suffix}-%"
     orgs = [world.org_a, world.org_b]
+    purge_financial(connection, orgs)  # every school is born with its settings row (0007)
     connection.execute(
         text("DELETE FROM sessions WHERE user_id IN (SELECT id FROM users WHERE email LIKE :p)"),
         {"p": pattern},

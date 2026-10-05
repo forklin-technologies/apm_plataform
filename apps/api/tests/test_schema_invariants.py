@@ -11,7 +11,10 @@ import pytest
 from sqlalchemy import Engine, text
 from sqlalchemy.exc import IntegrityError, ProgrammingError
 
+from app import models  # noqa: F401  (registers the models)
+from app.db.base import Base
 from tests.dbsupport import Tenants, transaction
+from tests.financial.test_isolation import TABLES as FINANCIAL_TABLES
 
 
 def _constraint(error: IntegrityError) -> str:
@@ -86,11 +89,15 @@ def test_every_organization_id_column_is_not_null(admin_engine: Engine) -> None:
             )
         ).all()
 
-    assert [tuple(r) for r in rows] == [
+    # The tenancy and authentication tables, and the 13 financial tables of ADR-015: every one of
+    # them has it NOT NULL.
+    expected = [
         ("invitations", True),
         ("memberships", True),
         ("schools", True),
+        *((t, True) for t in FINANCIAL_TABLES),
     ]
+    assert [tuple(r) for r in rows] == sorted(expected)
 
 
 def test_schools_and_memberships_refuse_a_missing_organization(
@@ -218,6 +225,23 @@ EXPECTED_FOREIGN_KEYS = {
 }
 
 
+def _financial_foreign_keys() -> dict[str, tuple[str, ...]]:
+    """The foreign keys of the financial tables as the models declare them (test_models proves the
+    names match the catalog; here the whole shape is compared: tables and ordered columns)."""
+    expected: dict[str, tuple[str, ...]] = {}
+    for table in Base.metadata.sorted_tables:
+        if table.name not in FINANCIAL_TABLES:
+            continue
+        for constraint in table.foreign_key_constraints:
+            expected[str(constraint.name)] = (
+                table.name,
+                constraint.referred_table.name,
+                ",".join(column.name for column in constraint.columns),
+                ",".join(element.column.name for element in constraint.elements),
+            )
+    return expected
+
+
 def test_the_foreign_keys_are_exactly_these_and_all_restrict(admin_engine: Engine) -> None:
     with admin_engine.connect() as connection:
         rows = connection.execute(
@@ -238,7 +262,9 @@ def test_the_foreign_keys_are_exactly_these_and_all_restrict(admin_engine: Engin
         ).all()
 
     found: dict[str, tuple[Any, ...]] = {r[0]: tuple(r[1:5]) for r in rows}
-    assert found == EXPECTED_FOREIGN_KEYS
+    financial = _financial_foreign_keys()
+    assert len(financial) >= 40  # not an empty comparison: 46 keys across the 13 tables
+    assert found == {**EXPECTED_FOREIGN_KEYS, **financial}
     # ON DELETE RESTRICT ('r'), ON UPDATE NO ACTION ('a'), MATCH SIMPLE ('s') for every one.
     assert {tuple(r[5:]) for r in rows} == {("r", "a", "s")}
 
@@ -283,14 +309,21 @@ REFERENCED_DELETES = [
 ]
 
 
+def _financial_references(table: str) -> set[str]:
+    """The foreign keys of the financial tables that point at `table` (every school has its
+    settings, for one): they may report the refusal too, ahead of the tenancy key."""
+    return {name for name, shape in _financial_foreign_keys().items() if shape[1] == table}
+
+
 @pytest.mark.parametrize(("sql", "allowed"), REFERENCED_DELETES)
 def test_deleting_something_that_is_referenced_is_refused(
     admin_engine: Engine, tenants: Tenants, sql: str, allowed: set[str]
 ) -> None:
     params = {"user_a1": tenants.user_a1, "school_a1": tenants.school_a1, "org_a": tenants.org_a}
+    table = sql.split()[2]  # DELETE FROM <table> WHERE ...
     with transaction(admin_engine) as connection, pytest.raises(IntegrityError) as error:
         connection.execute(text(sql), params)
-    assert _constraint(error.value) in allowed
+    assert _constraint(error.value) in allowed | _financial_references(table)
     assert "violates foreign key constraint" in str(error.value.orig)
 
 
