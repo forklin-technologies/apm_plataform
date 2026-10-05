@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { ANA, demoPassword, loginAs } from "./auth-helpers";
+import { ANA, apiAcceptsThisOrigin, demoPassword, loginAs } from "./auth-helpers";
 
 /**
  * TASK-011 (fatia 1): login, sessao no painel e logout contra a API REAL.
@@ -12,6 +12,7 @@ test("sem sessao, /painel volta para /login", async ({ page }) => {
 });
 
 test("senha errada: texto em portugues, igual para e-mail que nao existe, e a senha some do campo", async ({ page }) => {
+  test.skip(!apiAcceptsThisOrigin(), "a API real so aceita POST de :3100/:3101 (E2E_BASE_URL)");
   await page.goto("/login");
   // e-mail unico por execucao: nao gasta o contador de tentativas de ninguem
   await page.getByLabel("E-mail").fill(`e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.test`);
@@ -25,7 +26,7 @@ test("senha errada: texto em portugues, igual para e-mail que nao existe, e a se
 });
 
 test.describe("com a senha de demonstracao", () => {
-  test.skip(!demoPassword(), "sem E2E_DEMO_PASSWORD_FILE/E2E_DEMO_PASSWORD");
+  test.skip(!demoPassword() || !apiAcceptsThisOrigin(), "sem a senha de demonstracao ou fora de :3100/:3101");
 
   test("login real, painel com nome e vinculo reais, sair e /painel volta para /login", async ({ page }) => {
     await loginAs(page);
@@ -72,6 +73,7 @@ test("convite sem token: aviso claro e nenhum formulario", async ({ page }) => {
 });
 
 test("convite com token invalido: erro por code, sem dizer o motivo exato", async ({ page }) => {
+  test.skip(!apiAcceptsThisOrigin(), "a API real so aceita POST de :3100/:3101 (E2E_BASE_URL)");
   await page.goto("/accept-invitation?token=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG");
   await page.getByLabel("Nome completo").fill("Pessoa de Teste");
   await page.getByLabel("Senha", { exact: true }).fill("uma-senha-bem-longa-123");

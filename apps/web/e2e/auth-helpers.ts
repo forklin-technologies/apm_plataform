@@ -32,3 +32,8 @@ export async function loginAs(page: Page, email = ANA.email): Promise<void> {
   await page.getByRole("button", { name: "Entrar" }).click();
   await expect(page).toHaveURL(/\/painel$/);
 }
+
+/** A API so aceita pedidos que mudam dados das origens :3100 e :3101 (PUBLIC_ORIGINS de desenvolvimento). */
+export function apiAcceptsThisOrigin(): boolean {
+  return /^http:\/\/(127\.0\.0\.1|localhost):310[01]$/.test(process.env.E2E_BASE_URL ?? "");
+}
