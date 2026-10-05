@@ -4,13 +4,21 @@
 > trocar os mocks (`apps/web/src/mocks`) por chamadas reais, para o Backend e o Architect
 > revisarem. O frontend não decide nada disto: se o Backend preferir outro desenho, só
 > `apps/web/src/lib/api/` muda.
+>
+> **Atualização (TASK-011, fatia 1):** a **autenticação já é REAL** e vale `docs/auth.md` e o
+> ADR-017 (prefixo `/api/v1`, erros em `application/problem+json` com `code`, cookies `apm_session`
+> HttpOnly e `apm_csrf` legível, `X-CSRF-Token` nos pedidos que mudam dados). Onde esta página
+> divergir (formato de erro `{code, message}`, `/api/auth/*`, `GET /api/me/organizations`), vale o
+> `auth.md`/ADR-017. O resto (portal público, Pix, comprovante, indicadores, movimentações) continua
+> proposta e simulado.
 
 ## O que é REAL hoje
 
 | Endpoint | Resposta | Uso no web |
 |---|---|---|
 | `GET /api/health` | `200 {"status":"ok"}` | não usado |
-| `GET /api/health/ready` | `200 {"status":"ready"}` ou `503 {"status":"unavailable"}` | chip de status da API (única integração real) |
+| `GET /api/health/ready` | `200 {"status":"ready"}` ou `503 {"status":"unavailable"}` | chip de status da API |
+| `POST /api/v1/auth/login`, `POST /api/v1/auth/logout`, `GET /api/v1/auth/me`, `POST /api/v1/auth/context`, `POST /api/v1/auth/password`, `POST /api/v1/invitations/accept` | ver `docs/auth.md` | `/login`, sessão e seletor de vínculos do `/painel`, `/accept-invitation` (`src/lib/api/auth.ts`) |
 
 Fonte: `/api/openapi.json` da API em `http://127.0.0.1:8001`.
 
@@ -135,11 +143,11 @@ Cabeçalhos: `Cache-Control: private, no-store`, `Referrer-Policy: no-referrer`.
 Gera um novo Pix para a mesma contribuição quando o anterior expirou. Hoje o web cria uma nova
 contribuição (P2) com os mesmos dados; este endpoint evita pedidos duplicados.
 
-## Autenticação (Fase 1, ADR-009)
+## Autenticação (ADR-009, ADR-016, ADR-017)
 
-Fora do escopo desta tarefa; a tela `/login` é só visual e **não simula** login. O web espera:
-`POST /api/auth/login`, `POST /api/auth/logout`, `GET /api/auth/me`, sessão em cookie httpOnly
-(Secure, SameSite=Lax), proteção CSRF (Origin + token).
+**Já é real** (TASK-004 no backend, TASK-011 no web): ver `docs/auth.md`. Esta seção era a proposta
+original (`/api/auth/*`) e foi substituída pelos endpoints `/api/v1/auth/*` e
+`/api/v1/invitations/accept`.
 
 ## Painel (precisa de sessão)
 

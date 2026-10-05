@@ -39,23 +39,41 @@ no comando: `npm run start -- -H 0.0.0.0 -p 3000`. O último `-H` vence.
 
 ## Dados: o que é real e o que é simulado
 
-- **Real**: `GET /api/health/ready` (chip de status da API na entrada e no painel). O navegador só
-  chama `/api/*` na mesma origem; não há CORS nem requisição a terceiros.
-- **Simulado**: escolas, contribuição, Pix, comprovante e painel, em `src/mocks/`, atrás das
-  interfaces de `src/lib/api/types.ts`. Toda tela mostra o marcador **"Protótipo · dados de
-  exemplo"**. O Pix e o QR são de exemplo e não podem ser lidos por app de banco.
-- Os endpoints que o frontend vai precisar estão em `docs/web-contract-proposals.md` como
+- **Real**: `GET /api/health/ready` (chip de status da API) e a **autenticação** (`src/lib/api/auth.ts`,
+  contrato em `docs/auth.md`): `POST /api/v1/auth/login`, `logout`, `GET /auth/me`, `POST /auth/context`,
+  `POST /auth/password` e `POST /api/v1/invitations/accept`. O navegador só chama `/api/*` na mesma
+  origem; não há CORS nem requisição a terceiros.
+  - A sessão é um cookie **HttpOnly** (`apm_session`; `__Host-apm_session` em produção) que o site nunca
+    lê. O token CSRF vem do cookie legível `apm_csrf` e vai em `X-CSRF-Token` em todo pedido que muda
+    dados. A API só aceita esses pedidos das origens locais `127.0.0.1:3101`/`localhost:3101` (dev) e
+    `:3100` (prévia).
+  - `/painel` exige sessão: o **servidor do Next** repassa o cookie a `GET /api/v1/auth/me`
+    (`src/lib/api/server.ts`); sem sessão, redireciona para `/login`. API fora do ar não é logout: mostra
+    "Não foi possível abrir o painel".
+  - O seletor do painel lista os **vínculos reais** da pessoa e troca por `POST /auth/context`; o cliente
+    nunca define organização nem escola. Sessão sem vínculo ativo mostra a escolha antes do painel.
+  - Os textos de erro vêm do `code` do `problem+json` (`src/lib/auth-messages.ts`); o `title`/`detail` do
+    servidor nunca aparece. `/login?next=` só aceita `/painel` e o link do convite (lista fechada).
+  - `POST /auth/password` tem cliente e testes, mas **ainda não tem tela**.
+- **Simulado**: escolas, contribuição, Pix, comprovante, **indicadores e movimentações do painel**, em
+  `src/mocks/`, atrás das interfaces de `src/lib/api/types.ts`. Essas telas mostram o marcador
+  **"Protótipo · dados de exemplo"**. O Pix e o QR são de exemplo e não podem ser lidos por app de banco.
+- Os endpoints que o frontend ainda vai precisar estão em `docs/web-contract-proposals.md` como
   **proposta**.
 
-Rotas: `/` · `/apm/[slug]` · `/apm/[slug]/pedido/[token]` · `/login` (visual, sem login) · `/painel`.
+Usuários de demonstração (dados falsos) e a senha do seed ficam fora do repositório. Testes de unidade
+usam mocks; o e2e com login real lê a senha só em tempo de execução (`E2E_DEMO_PASSWORD_FILE`, veja
+`e2e/auth-helpers.ts`) e roda contra o `npm run dev` (3101), porque a API só aceita as origens acima.
+
+Rotas: `/` · `/apm/[slug]` · `/apm/[slug]/pedido/[token]` · `/login` · `/accept-invitation?token=…` · `/painel` (exige sessão).
 Escolas de exemplo: `escola-exemplo`, `escola-horizonte`, `emei-vale-verde`.
 
 ## Estrutura
 
 ```
 src/app/          rotas (App Router)
-src/components/   ui/, portal/, painel/, status/, login/
-src/lib/          money (centavos + BRL), validation, status, color (contraste AA), api/, hooks/
+src/components/   ui/, portal/, painel/, status/, login/, invitation/
+src/lib/          money (centavos + BRL), validation, status, color (contraste AA), api/ (health, auth, csrf, server), auth-messages, safe-next, roles, hooks/
 src/mocks/        camada de dados simulada (só src/lib/api importa daqui)
 src/proxy.ts      CSP com nonce por requisição
 ```
