@@ -1,7 +1,9 @@
 /**
  * Tipos do contrato entre o frontend e a API.
  *
- * REAIS hoje (veja /api/openapi.json): GET /api/health e GET /api/health/ready.
+ * REAIS hoje (veja /api/openapi.json): GET /api/health, GET /api/health/ready e a autenticacao
+ * (/api/v1/auth/* e /api/v1/invitations/accept, docs/auth.md). Os tipos de auth ficam em camelCase:
+ * a conversao do snake_case da API acontece em src/lib/api/auth.ts, na fronteira.
  * TODO o resto e PROPOSTA (docs/web-contract-proposals.md), hoje simulada em src/mocks.
  * Dinheiro: sempre inteiro em centavos.
  */
@@ -11,12 +13,26 @@ import type { MovementKind, MovementStatus, PixChargeStatus } from "../status";
 
 // ---------------------------------------------------------------- resultado e erros
 
-export type ApiErrorKind = "network" | "timeout" | "http" | "invalid-response" | "not-found";
+export type ApiErrorKind = "network" | "timeout" | "http" | "invalid-response" | "not-found" | "problem";
+
+/** Erro de campo de um 422 (`errors[]` do problem+json): campo e codigo FIXO, nunca texto do servidor. */
+export interface FieldError {
+  field: string;
+  code: string;
+}
 
 export interface ApiError {
   kind: ApiErrorKind;
   /** Status HTTP quando houve resposta. */
   status?: number;
+  /**
+   * `code` estavel de um application/problem+json (kind "problem"). E a UNICA parte do erro do
+   * servidor que a interface usa: o texto em portugues vem do `code`, nunca de title/detail.
+   */
+  code?: string;
+  /** Retry-After (segundos) de um 429, ja limitado a um intervalo razoavel. */
+  retryAfterSeconds?: number;
+  fields?: FieldError[];
 }
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: ApiError };
@@ -29,6 +45,59 @@ export type ReadinessStatus = "ready" | "unavailable";
 export type ReadinessResult =
   | { state: "ready" }
   | { state: "unavailable"; reason: "not-ready" | "unreachable" };
+
+// ---------------------------------------------------------------- REAL: autenticacao (docs/auth.md)
+
+export const ROLES = ["organization_admin", "school_admin", "treasurer", "staff", "viewer"] as const;
+export type Role = (typeof ROLES)[number];
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  fullName: string;
+}
+
+export interface OrganizationRef {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+/** Vinculo (membership): uma organizacao (e, se houver, uma escola) com um papel. */
+export interface Membership {
+  membershipId: string;
+  organization: OrganizationRef;
+  /** null = vinculo da organizacao inteira (rede). */
+  school: SchoolRef | null;
+  role: Role;
+}
+
+export interface ActiveMembership extends Membership {
+  /** So para esconder o que a pessoa nao pode fazer. O servidor confere de novo a cada pedido. */
+  permissions: string[];
+}
+
+/** Quem esta logado e onde atua. O token CSRF NAO entra aqui: o cliente le do cookie legivel. */
+export interface Session {
+  user: AuthUser;
+  /** null enquanto a pessoa com varios vinculos ainda nao escolheu onde atuar. */
+  activeMembership: ActiveMembership | null;
+  memberships: Membership[];
+  expiresAt: string;
+  idleTimeoutSeconds: number;
+}
+
+export interface AcceptedInvitation {
+  userId: string;
+  membership: Membership;
+}
+
+export interface AcceptInvitationInput {
+  token: string;
+  /** Pessoa nova: nome e senha. Conta existente: so o token, com a pessoa logada. */
+  fullName?: string;
+  password?: string;
+}
 
 // ---------------------------------------------------------------- PROPOSTA: escola publica
 

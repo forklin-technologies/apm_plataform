@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { apiGet } from "./client";
+import { apiGet, apiSend } from "./client";
 import { getReadiness } from "./health";
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -93,5 +93,116 @@ describe("getReadiness", () => {
   it("corpo que nao e JSON -> unreachable", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response("nope", { status: 200 }));
     expect(await getReadiness({ fetchImpl })).toEqual({ state: "unavailable", reason: "unreachable" });
+  });
+});
+
+describe("apiSend", () => {
+  const TOKEN = "t".repeat(32);
+
+  it("envia JSON, o cabecalho X-CSRF-Token e usa a mesma origem", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ ok: 1 }));
+    const result = await apiSend("POST", "/api/v1/x", { a: 1 }, (b) => b, { fetchImpl, csrfToken: TOKEN });
+    expect(result).toEqual({ ok: true, data: { ok: 1 } });
+    const [url, init] = fetchImpl.mock.calls[0]!;
+    expect(url).toBe("/api/v1/x");
+    expect(init).toMatchObject({ method: "POST", body: '{"a":1}', credentials: "same-origin", cache: "no-store" });
+    expect(init.headers).toMatchObject({ "Content-Type": "application/json", "X-CSRF-Token": TOKEN, Accept: "application/json" });
+  });
+
+  it("le o token do cookie legivel quando nao e informado, e nao manda cabecalho sem cookie", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({}));
+    document.cookie = `apm_csrf=${TOKEN}; path=/`;
+    await apiSend("POST", "/api/v1/x", undefined, (b) => b, { fetchImpl });
+    expect(fetchImpl.mock.calls[0]![1].headers["X-CSRF-Token"]).toBe(TOKEN);
+    expect(fetchImpl.mock.calls[0]![1].body).toBeUndefined();
+    expect(fetchImpl.mock.calls[0]![1].headers["Content-Type"]).toBeUndefined();
+    document.cookie = "apm_csrf=; Max-Age=0; path=/";
+    await apiSend("POST", "/api/v1/x", undefined, (b) => b, { fetchImpl });
+    expect(fetchImpl.mock.calls[1]![1].headers["X-CSRF-Token"]).toBeUndefined();
+  });
+
+  it("GET nunca leva X-CSRF-Token", async () => {
+    document.cookie = `apm_csrf=${TOKEN}; path=/`;
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({}));
+    await apiGet("/api/x", (b) => b, { fetchImpl });
+    expect(fetchImpl.mock.calls[0]![1].headers["X-CSRF-Token"]).toBeUndefined();
+    document.cookie = "apm_csrf=; Max-Age=0; path=/";
+  });
+
+  it("so aceita caminhos /api/* e nao chama a rede para os outros", async () => {
+    const fetchImpl = vi.fn();
+    const result = await apiSend("POST", "https://evil.example/api/x", {}, (b) => b, { fetchImpl });
+    expect(result.ok).toBe(false);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("problem+json vira kind 'problem' so com o code; title, detail e request_id do servidor somem", async () => {
+    const body = {
+      type: "urn:x", title: "Invalid e-mail or password", status: 401, code: "invalid_credentials",
+      request_id: "abc", detail: "detalhe em ingles",
+    };
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(body, 401));
+    const result = await apiSend("POST", "/api/v1/x", {}, () => null, { fetchImpl });
+    expect(result).toEqual({ ok: false, error: { kind: "problem", status: 401, code: "invalid_credentials" } });
+    expect(JSON.stringify(result)).not.toMatch(/Invalid e-mail|detalhe|abc/);
+  });
+
+  it("429: Retry-After em segundos, limitado a uma hora; valor estranho e ignorado", async () => {
+    const make = (retry: string) =>
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ code: "rate_limited" }), { status: 429, headers: { "Retry-After": retry } }),
+      );
+    const a = await apiSend("POST", "/api/v1/x", {}, () => null, { fetchImpl: make("30") });
+    const b = await apiSend("POST", "/api/v1/x", {}, () => null, { fetchImpl: make("999999") });
+    const c = await apiSend("POST", "/api/v1/x", {}, () => null, { fetchImpl: make("Wed, 21 Oct 2026 07:28:00 GMT") });
+    const d = await apiSend("POST", "/api/v1/x", {}, () => null, { fetchImpl: make("-5") });
+    expect(a).toMatchObject({ error: { code: "rate_limited", retryAfterSeconds: 30 } });
+    expect(b).toMatchObject({ error: { retryAfterSeconds: 3600 } });
+    expect(c).toMatchObject({ error: { code: "rate_limited" } });
+    expect((c as { error: { retryAfterSeconds?: number } }).error.retryAfterSeconds).toBeUndefined();
+    expect((d as { error: { retryAfterSeconds?: number } }).error.retryAfterSeconds).toBeUndefined();
+  });
+
+  it("422: guarda so campo e code de cada erro (lista limitada e validada)", async () => {
+    const body = {
+      code: "weak_password",
+      errors: [{ field: "password", code: "too_short" }, { field: 1, code: "x" }, { field: "a", code: "Mensagem Livre!" }, "x"],
+    };
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse(body, 422));
+    const result = await apiSend("POST", "/api/v1/x", {}, () => null, { fetchImpl });
+    expect(result).toEqual({
+      ok: false,
+      error: { kind: "problem", status: 422, code: "weak_password", fields: [{ field: "password", code: "too_short" }] },
+    });
+  });
+
+  it("code malformado, sem JSON ou sem code vira erro http comum", async () => {
+    for (const response of [
+      jsonResponse({ code: "<script>" }, 400),
+      new Response("Bad Gateway", { status: 502 }),
+      jsonResponse({ detail: "x" }, 500),
+    ]) {
+      const result = await apiSend("POST", "/api/v1/x", {}, () => null, { fetchImpl: vi.fn().mockResolvedValue(response) });
+      expect(result).toMatchObject({ ok: false, error: { kind: "http" } });
+      expect((result as { error: { code?: string } }).error.code).toBeUndefined();
+    }
+  });
+
+  it("rede e timeout nao lancam e nao escrevem no console", async () => {
+    const spies = [vi.spyOn(console, "error"), vi.spyOn(console, "warn"), vi.spyOn(console, "log")];
+    expect(await apiSend("POST", "/api/v1/x", {}, (b) => b, { fetchImpl: vi.fn().mockRejectedValue(new TypeError("x")) })).toEqual({
+      ok: false,
+      error: { kind: "network" },
+    });
+    const hang = vi.fn(
+      (_u: unknown, init?: RequestInit) =>
+        new Promise<Response>((_res, rej) => init?.signal?.addEventListener("abort", () => rej(new DOMException("a", "AbortError")))),
+    );
+    expect(await apiSend("POST", "/api/v1/x", {}, (b) => b, { fetchImpl: hang as unknown as typeof fetch, timeoutMs: 15 })).toEqual({
+      ok: false,
+      error: { kind: "timeout" },
+    });
+    for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
   });
 });
