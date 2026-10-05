@@ -55,6 +55,20 @@ def test_the_person_reimbursed_does_not_register_their_own_reimbursement(scene: 
     )
 
 
+def test_the_author_does_not_register_the_payment_of_their_own_expense(scene: Scene) -> None:
+    author = scene.person("school_admin", label="author")
+    other = scene.person("school_admin", label="other")
+    expense = scene.approved(author, other, paid_by="APM")
+
+    own = author.post(f"/expenses/{expense['id']}/pay")
+
+    assert own.status_code == 403 and own.json()["code"] == "self_payment_forbidden"
+    assert own.headers["content-type"].startswith("application/problem+json")
+    assert scene.row(expense["id"]).status == "APPROVED"
+    assert scene.row(expense["id"]).settled_at is None
+    assert other.post(f"/expenses/{expense['id']}/pay").status_code == 200
+
+
 # --- the edit window ------------------------------------------------------------------------------
 
 

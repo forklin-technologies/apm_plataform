@@ -2,7 +2,6 @@
 writes), and what the database refuses reaches the client as a problem with a stable code, with no
 text of the database in it."""
 
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -11,7 +10,7 @@ from sqlalchemy.exc import DBAPIError
 
 from app.core.errors import ProblemError
 from app.expenses.db_errors import database_rules, problem_for
-from tests.expenses.support import Scene, pdf
+from tests.expenses.support import Scene, pdf, refusal
 
 # --- the audit ------------------------------------------------------------------------------------
 
@@ -134,12 +133,6 @@ def test_a_reimbursement_is_recorded_for_the_person_who_paid_without_the_referen
 
 
 # --- what the database refuses --------------------------------------------------------------------
-
-
-def refusal(sqlstate: str, constraint: str | None = None) -> DBAPIError:
-    """What the driver raises: an error with a SQLSTATE and, for a constraint, its name."""
-    orig = SimpleNamespace(sqlstate=sqlstate, diag=SimpleNamespace(constraint_name=constraint))
-    return DBAPIError("UPDATE secret_table SET secret = 1", {}, orig)  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize(

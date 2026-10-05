@@ -15,14 +15,14 @@ All under `/api/v1/schools/{school_id}`. `school_id` is **checked against the se
 | `GET /expenses` | `expenses:read_own` or `expenses:read_all` | `{items, next_cursor}`. With `read_all` every expense of the school, otherwise only the caller's. `?status=`, `?period=YYYY-MM` (the month of the date of the expense, in the school's time zone), `?cursor=`, `?limit=` (1 to 100, default 50). Newest first (by reference code) |
 | `GET /expenses/{id}` | same | The expense with its attachments and, once paid, its reimbursement |
 | `PATCH /expenses/{id}` | `expenses:submit` | Edits it. Only fields present change. Its author only, only in DRAFT or CORRECTION_REQUESTED. `paid_by` cannot change |
-| `POST /expenses/{id}/attachments` | `expenses:submit` | Multipart: `file` and optional `kind` (`INVOICE`, `PAYMENT_PROOF`, `OTHER`; default `OTHER`). Author only; not on a PAID, REJECTED or CANCELLED expense |
+| `POST /expenses/{id}/attachments` | `expenses:submit` | Multipart: `file` and optional `kind` (`INVOICE`, `PAYMENT_PROOF`, `OTHER`; default `OTHER`). Author only, and only while the expense is a DRAFT or CORRECTION_REQUESTED (`409 attachments_closed` otherwise) |
 | `GET /expenses/{id}/attachments/{attachment_id}` | `expenses:read_own` or `expenses:read_all` | Downloads the file, for whoever can see the expense |
 | `POST /expenses/{id}/submit` | `expenses:submit` | DRAFT or CORRECTION_REQUESTED to SUBMITTED. Author only. Needs an attachment, `purchase_reason` and `payment_method` |
 | `POST /expenses/{id}/approve` | `expenses:approve` | SUBMITTED to APPROVED. Body optional: `approved_amount_cents`, `reason` |
 | `POST /expenses/{id}/reject` | `expenses:approve` | SUBMITTED to REJECTED (final). Body: `reason` (3 to 500 characters) |
 | `POST /expenses/{id}/request-correction` | `expenses:approve` | SUBMITTED to CORRECTION_REQUESTED. Body: `reason` (3 to 500) |
 | `POST /expenses/{id}/reimburse` | `reimbursements:register` | APPROVED, paid by a collaborator: creates the REIMBURSEMENT for the approved amount, records `payment_reference` and who paid, and the expense goes to PAID. Body: `payment_reference` |
-| `POST /expenses/{id}/pay` | `reimbursements:register` | APPROVED, paid by the APM: records the payment, the expense goes to PAID |
+| `POST /expenses/{id}/pay` | `reimbursements:register` | APPROVED, paid by the APM: records the payment, the expense goes to PAID. Not by the author (`403 self_payment_forbidden`) |
 | `POST /expenses/{id}/cancel` | `expenses:submit` or `expenses:approve` | CANCELLED (final). The author, a DRAFT or CORRECTION_REQUESTED; an approver, an APPROVED one |
 
 Every action answers `200` with the full expense. Money is integer cents (`_cents`), instants are ISO 8601, the states are the database's (`DRAFT`, `SUBMITTED`, ...), with no translation. `occurred_at` is an instant with its UTC offset **or** a plain day, which means noon of that day in the school's time zone.
@@ -40,7 +40,7 @@ A SUBMITTED expense is **not** cancelled: it is decided or sent back. Nothing is
 
 ## The rules the service adds
 
-- **The author never decides on their own expense**: `approve`, `reject` and `request-correction` answer `403 self_approval_forbidden` to the author (the database also refuses an approver equal to the submitter). Nor does the person to be reimbursed register their own reimbursement (`403 self_reimbursement_forbidden`).
+- **The author never decides on their own expense**: `approve`, `reject` and `request-correction` answer `403 self_approval_forbidden` to the author (the database also refuses an approver equal to the submitter). Nor does the person to be reimbursed register their own reimbursement (`403 self_reimbursement_forbidden`), nor the author the payment of their own expense (`403 self_payment_forbidden`).
 - **Only the author** edits, attaches and sends (`403 author_only` for someone else who can see the expense; a colleague who reads only their own gets the `404`).
 - **Reading**: `expenses:read_all` (treasurer, administrators) sees every expense of the school, everyone else only their own; somebody else's is the same `404` as one that never existed.
 - **Partial approval**: `approved_amount_cents` is omitted (the requested amount), at most the requested amount (`422 validation_error`, `above_requested`), and lower only when a collaborator paid (`422 partial_approval_not_allowed`). The reimbursement is **exactly** the approved amount; the request stays in `amount_cents`.
@@ -56,10 +56,10 @@ A SUBMITTED expense is **not** cancelled: it is decided or sent back. Nothing is
 | Status | `code` | When |
 | --- | --- | --- |
 | 403 | `permission_denied` | the role does not hold the permission |
-| 403 | `author_only`, `self_approval_forbidden`, `self_reimbursement_forbidden` | the rules above |
+| 403 | `author_only`, `self_approval_forbidden`, `self_reimbursement_forbidden`, `self_payment_forbidden` | the rules above |
 | 404 | `not_found` | unknown, another school or organization, someone else's (for who reads only their own), a file that is not of that expense |
 | 409 | `invalid_state` | the action does not apply in the current state (`detail` names it) |
-| 409 | `expense_final`, `attachment_limit`, `attachment_duplicate` | attachments |
+| 409 | `attachments_closed`, `attachment_limit`, `attachment_duplicate` | attachments (`attachments_closed`: the expense was already sent; `detail` names its state) |
 | 409 | `reimbursement_not_applicable`, `payment_by_reimbursement`, `reimbursement_category_missing`, `reimbursement_exists` | payment |
 | 409 | `conflict`, `state_conflict`, `retry` | the database refused and none of the above says why (a race) |
 | 411, 413, 415 | `length_required`, `payload_too_large`, `attachment_type_not_allowed` | the upload |
@@ -71,13 +71,13 @@ The service checks every rule it knows before writing; `app/expenses/db_errors.p
 
 ## Attachments and the store
 
-- **Upload**: `multipart/form-data` with `file` (and `kind`). The request must declare its size (`Content-Length`, else `411`); it is refused with `413` before it is read when it is bigger than the limit plus 64 KiB of envelope, and again while the file is streamed. The form is read **after** the permission and the school were checked.
+- **Upload**: `multipart/form-data` with `file` (and `kind`). The request must declare its size (`Content-Length`, ASCII digits, else `411`); it is refused with `413` before it is read when it is bigger than the limit plus 64 KiB of envelope, and again while the file is streamed. The form is read **after** the permission and the school were checked.
 - **Limit**: `ATTACHMENT_MAX_BYTES` (default 10 MiB, at most 20 MiB: what the database accepts). At most 10 attachments per expense, and the same file (same `sha256`) only once per expense.
 - **Type**: from the first bytes, never from the name or the `Content-Type` the client sent: PNG, JPEG, WebP and PDF. Anything else, an SVG or an HTML included, is `415`. The type stored (and served) is the recognised one.
 - **Hash and name**: `sha256` of the bytes, computed while streaming. The name is only a label: no path, no control characters, at most 200 characters. The store key is `<organization>/<school>/<expense>/<random>`, made by the server; nothing the client sent is part of it.
-- **Order**: the bytes are stored first, then the row is written and committed; if that fails the file is removed. A crash between the two leaves an orphan file, never a row without a file.
+- **Order**: the bytes are stored first, then the row is written and committed. If writing the row fails the file is removed (and a failing removal is logged, never allowed to replace the error the caller sees). If the **commit** fails the file is kept: the commit may have reached the server and only the answer got lost, and a row without its file is worse than a file without a row. A crash or a refused commit leaves an orphan file, never a row without a file.
 - **Download**: `Content-Disposition: attachment`, the recognised `Content-Type`, `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`, `Cache-Control: private, no-store`. Only whoever can see the expense; any other (and a file of another expense) is `404`.
-- **Where**: `app/storage/` is an interface (`AttachmentStore`: `put`, `open`, `exists`, `delete`) and one implementation, `LocalDiskStore`: one file per key under `ATTACHMENTS_DIR` (`/attachments`, a docker volume in compose), files `0600`, directories `0700`, written once (`O_EXCL`), keys validated segment by segment. No cloud. A new backend is a new class with the same four methods, returned by `get_attachment_store`.
+- **Where**: `app/storage/` is an interface (`AttachmentStore`: `put`, `open`, `exists`, `delete`) and one implementation, `LocalDiskStore`: one file per key under `ATTACHMENTS_DIR` (opened only when the first chunk is read, so a download nobody reads holds no descriptor) (`/attachments`, a docker volume in compose), files `0600`, directories `0700`, written once (`O_EXCL`), keys validated segment by segment. No cloud. A new backend is a new class with the same four methods, returned by `get_attachment_store`.
 
 ### Adding a type of attachment
 

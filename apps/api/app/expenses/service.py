@@ -14,6 +14,7 @@ import base64
 import binascii
 import datetime as dt
 import hashlib
+import logging
 import re
 import unicodedata
 import uuid
@@ -43,6 +44,8 @@ from app.expenses.schemas import (
 from app.storage import AttachmentStore
 from app.storage.base import CHUNK_SIZE
 
+logger = logging.getLogger(__name__)
+
 Row = repository.Row
 
 # Where the "who spent it" of the ledger comes from: the role of the person who made the expense.
@@ -57,7 +60,6 @@ DEFAULT_ORIGIN = "EMPLOYEE"
 REIMBURSEMENT_CATEGORY = {"DIRECTOR": "director_reimbursement"}
 DEFAULT_REIMBURSEMENT_CATEGORY = "teacher_reimbursement"
 
-FINAL_STATUSES = ("PAID", "REJECTED", "CANCELLED")
 MAX_ATTACHMENTS_PER_EXPENSE = 10
 MAX_DAYS_AHEAD = 1  # an expense is not dated in the future (a day of slack for the time zones)
 _PERIOD = re.compile(r"(\d{4})-(0[1-9]|1[0-2])")
@@ -386,6 +388,19 @@ def _limited_chunks(first: bytes, stream: BinaryIO, hasher: _Hasher, limit: int)
         chunk = stream.read(CHUNK_SIZE)
 
 
+def _discard(store: AttachmentStore, key: str) -> None:
+    """Remove a file that no row will point to. It runs while another error is being raised, so it
+    must never raise itself (it would replace the error the caller needs to see): a failure is
+    logged, with the class of the error and never the key or a path, and the file is left behind."""
+    try:
+        store.delete(key)
+    except Exception as error:
+        logger.error(
+            "could not remove an attachment file after a failed write",
+            extra={"error_class": type(error).__name__},
+        )
+
+
 def add_attachment(
     db: Session,
     scope: SchoolScope,
@@ -397,21 +412,26 @@ def add_attachment(
     stream: BinaryIO,
     max_bytes: int,
 ) -> AttachmentOut:
-    """Only the author, and only while the expense is not final (the database says the same).
+    """Only the author, and only while the expense is a DRAFT or waiting for a correction: after it
+    was sent, the evidence is what the approver saw (the database would still allow more until the
+    expense is final).
 
     The type is read from the bytes (an image or a PDF), the size is bounded while streaming, and
-    the sha256 is computed on the way to the store. The bytes are stored first and the row after:
-    if the row (or the commit) fails, the stored file is removed.
+    the sha256 is computed on the way to the store. The bytes are stored first and the row after.
+    If writing the row fails, the stored file is removed. If the COMMIT fails the file is kept:
+    the commit may have reached the server and only the answer got lost, and a row without its
+    file is worse than a file without a row (an orphan, which a clean-up job can find).
     """
     with database_rules(db):
         row = _load_for_update(db, scope, expense_id)
         if row["submitted_by_user_id"] != scope.user_id:
             raise _author_only()
-        if row["status"] in FINAL_STATUSES:
+        if row["status"] not in repository.EDITABLE_STATUSES:
+            # Once it was sent, what the approver looked at is what gets approved and paid.
             raise ProblemError(
                 409,
-                "expense_final",
-                "No file can be attached to an expense that is final",
+                "attachments_closed",
+                "Files can only be attached while the expense is a draft or being corrected",
                 detail=f"The expense is {row['status']}.",
             )
         if row["attachments_count"] >= MAX_ATTACHMENTS_PER_EXPENSE:
@@ -455,10 +475,10 @@ def add_attachment(
                 kind=kind,
                 size_bytes=size,
             )
-            db.commit()
         except BaseException:
-            store.delete(key)
+            _discard(store, key)
             raise
+        db.commit()  # a failure HERE keeps the file (see the docstring)
     return AttachmentOut.model_validate(dict(created))
 
 
@@ -693,7 +713,8 @@ def reimburse(
 
 def pay(db: Session, scope: SchoolScope, expense_id: uuid.UUID) -> ExpenseDetail:
     """APPROVED to PAID for an expense the APM paid itself (a collaborator's expense is paid by its
-    reimbursement). It records a payment already made; the cash entry is booked now."""
+    reimbursement). It records a payment already made; the cash entry is booked now. Not by the
+    author of the expense, as for a reimbursement."""
     with database_rules(db):
         row = _load_for_update(db, scope, expense_id)
         _require_status(row, "APPROVED")
@@ -702,6 +723,10 @@ def pay(db: Session, scope: SchoolScope, expense_id: uuid.UUID) -> ExpenseDetail
                 409,
                 "payment_by_reimbursement",
                 "An expense paid by a collaborator is paid by its reimbursement",
+            )
+        if row["submitted_by_user_id"] == scope.user_id:
+            raise ProblemError(
+                403, "self_payment_forbidden", "Nobody registers the payment of their own expense"
             )
         if not repository.settle(db, scope.school_id, expense_id, expected="APPROVED"):
             raise _invalid_state(row)

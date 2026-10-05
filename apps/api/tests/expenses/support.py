@@ -6,12 +6,20 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from httpx2 import Response
 from sqlalchemy import Engine, text
+from sqlalchemy.exc import DBAPIError
 
-from app.storage import LocalDiskStore, StorageSettings, get_attachment_store, get_storage_settings
+from app.storage import (
+    AttachmentStore,
+    LocalDiskStore,
+    StorageSettings,
+    get_attachment_store,
+    get_storage_settings,
+)
 from tests.authsupport import Api, ApiFactory, TestUser, UserFactory, World
 
 PNG_HEAD = b"\x89PNG\r\n\x1a\n"
@@ -209,13 +217,15 @@ class Scene:
             )
 
 
-def storage_overrides(directory: Path, max_bytes: int) -> Callable[[Any], None]:
-    """Make an app store its files in `directory` and accept at most `max_bytes` per file."""
+def storage_overrides(
+    directory: Path, max_bytes: int, store: AttachmentStore | None = None
+) -> Callable[[Any], None]:
+    """Make an app store its files in `directory` (or in `store`) and accept at most `max_bytes`."""
 
     def configure(app: Any) -> None:
-        store = LocalDiskStore(directory)
+        chosen = store or LocalDiskStore(directory)
         settings = StorageSettings(attachments_dir=str(directory), attachment_max_bytes=max_bytes)
-        app.dependency_overrides[get_attachment_store] = lambda: store
+        app.dependency_overrides[get_attachment_store] = lambda: chosen
         app.dependency_overrides[get_storage_settings] = lambda: settings
 
     return configure
@@ -228,3 +238,9 @@ def stored_files(directory: Path) -> list[Path]:
         if directory.exists()
         else []
     )
+
+
+def refusal(sqlstate: str, constraint: str | None = None) -> DBAPIError:
+    """What the driver raises: an error with a SQLSTATE and, for a constraint, its name."""
+    orig = SimpleNamespace(sqlstate=sqlstate, diag=SimpleNamespace(constraint_name=constraint))
+    return DBAPIError("UPDATE secret_table SET secret = 1", {}, orig)  # type: ignore[arg-type]
