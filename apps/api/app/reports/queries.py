@@ -62,7 +62,9 @@ def settled_contributions(
     """The contributions booked in the cash ledger in the period (the window of the statement: from
     00:00 of the first day to 00:00 after the last, in the time zone of the school), with what the
     detail rows know about them. One row per contribution: the Pix id is that of its paid charge,
-    or the reference of a direct Pix."""
+    or the reference of a direct Pix. The detail row is a LEFT JOIN, like in `statement_summary`
+    (which does not read it at all): a contribution without one is still money in the ledger, and
+    the list must add up to the summary."""
     rows = db.execute(
         text(
             "SELECT f.id AS transaction_id, f.reference_code, f.status, f.amount_cents, "
@@ -73,7 +75,7 @@ def settled_contributions(
             "FROM school_settings st "
             "JOIN financial_transactions f ON f.school_id = st.school_id "
             "JOIN categories cat ON cat.id = f.category_id AND cat.school_id = st.school_id "
-            "JOIN contributions c ON c.transaction_id = f.id AND c.school_id = st.school_id "
+            "LEFT JOIN contributions c ON c.transaction_id = f.id AND c.school_id = st.school_id "
             "LEFT JOIN LATERAL (SELECT p.end_to_end_id FROM pix_charges p "
             "  WHERE p.transaction_id = f.id AND p.school_id = st.school_id "
             "  AND p.end_to_end_id IS NOT NULL "
@@ -102,7 +104,7 @@ def unsettled_contributions(
             "FROM school_settings st "
             "JOIN financial_transactions f ON f.school_id = st.school_id "
             "JOIN categories cat ON cat.id = f.category_id AND cat.school_id = st.school_id "
-            "JOIN contributions c ON c.transaction_id = f.id AND c.school_id = st.school_id "
+            "LEFT JOIN contributions c ON c.transaction_id = f.id AND c.school_id = st.school_id "
             "LEFT JOIN LATERAL (SELECT p.end_to_end_id FROM pix_charges p "
             "  WHERE p.transaction_id = f.id AND p.school_id = st.school_id "
             "  AND p.end_to_end_id IS NOT NULL "

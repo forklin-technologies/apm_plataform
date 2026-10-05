@@ -263,3 +263,33 @@ def test_sections_that_disagree_with_the_summary_give_no_pdf(
     response = api.get(contributions_path(scene.fresh.school))
 
     assert (response.status_code, response.json()["code"]) == (409, "report_mismatch")
+
+
+def test_a_contribution_without_its_detail_row_is_still_in_the_list_and_in_the_total(
+    scene: Scene, login: Login, admin_engine: Engine
+) -> None:
+    f = scene.fresh
+    with admin_engine.begin() as conn:  # a ledger row whose detail row is missing (triggers off)
+        conn.execute(text("SET LOCAL session_replication_role = replica"))
+        conn.execute(
+            text(
+                "INSERT INTO financial_transactions (organization_id, school_id, kind, direction, "
+                "amount_cents, status, category_id, origin_type, occurred_at, settled_at, "
+                "created_by_user_id, reference_code) VALUES (:o, :s, 'CONTRIBUTION', 'IN', 1000, "
+                "'PAID', :c, 'GUARDIAN', '2025-03-25T12:00:00Z', '2025-03-25T12:00:00Z', :u, 9901)"
+            ),
+            {"o": f.org, "s": f.school, "c": f.cat_in, "u": f.treasurer},
+        )
+    api = login(scene.users["treasurer"])
+    summary = api.get(
+        f"/api/v1/schools/{f.school}/statement/summary", params={"period": "2025-03"}
+    ).json()
+
+    response = api.get(contributions_path(f.school))
+
+    assert summary["contributions_in_cents"] == 6000  # 5000 of Maria and the 1000 without detail
+    assert response.status_code == 200, response.text
+    everything = text_of(response.content)
+    assert "APM-009901" in everything
+    assert "Subtotal (2) R$ 60,00" in everything  # the list closes with the summary
+    assert "Contribuinte anônimo" in everything  # no detail row, no name
