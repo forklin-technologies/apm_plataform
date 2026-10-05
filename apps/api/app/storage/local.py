@@ -5,17 +5,14 @@ disk before `put` returns. The key is checked segment by segment, and the final 
 be inside the root, so no key can reach outside it.
 """
 
-import errno
 import os
 import re
 from collections.abc import Iterable, Iterator
 from pathlib import Path
-from typing import BinaryIO
 
 from app.storage.base import (
     CHUNK_SIZE,
     StorageConflictError,
-    StorageError,
     StorageKeyError,
     StorageNotFoundError,
 )
@@ -80,15 +77,12 @@ class LocalDiskStore:
 
     def open(self, key: str) -> Iterator[bytes]:
         path = self._path(key)
-        try:
-            handle = path.open("rb")
-        except (FileNotFoundError, NotADirectoryError):
-            raise StorageNotFoundError("nothing is stored under this key") from None
-        except OSError as error:
-            if error.errno == errno.ELOOP:
-                raise StorageNotFoundError("nothing is stored under this key") from None
-            raise StorageError("the file could not be opened") from None
-        return _read(handle)
+        if not path.is_file():
+            raise StorageNotFoundError("nothing is stored under this key")
+        # The file is opened by the generator itself, when the first chunk is asked for and closed
+        # when it ends, fails or is closed: nothing holds a descriptor between this call and the
+        # first read, so a response that is never sent (the client left) leaks none.
+        return _read(path)
 
     def exists(self, key: str) -> bool:
         return self._path(key).is_file()
@@ -97,7 +91,7 @@ class LocalDiskStore:
         self._path(key).unlink(missing_ok=True)
 
 
-def _read(handle: BinaryIO) -> Iterator[bytes]:
-    with handle:
+def _read(path: Path) -> Iterator[bytes]:
+    with path.open("rb") as handle:
         while chunk := handle.read(CHUNK_SIZE):
             yield chunk

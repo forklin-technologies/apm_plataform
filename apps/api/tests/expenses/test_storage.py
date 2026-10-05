@@ -1,6 +1,7 @@
 """The local attachment store and the type of a file."""
 
 import os
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -58,6 +59,30 @@ def test_a_write_that_fails_leaves_nothing_behind(tmp_path: Path) -> None:
     assert not store.exists(KEY)
     store.put(KEY, iter([b"fine"]))  # the key is free again
     assert read(store, KEY) == b"fine"
+
+
+def test_nothing_holds_a_file_open_until_the_first_chunk_is_asked_for(tmp_path: Path) -> None:
+    """A response whose client left never reads a chunk: it must not leave a descriptor open."""
+    fds = Path("/proc/self/fd")
+    if not fds.is_dir():
+        pytest.skip("needs /proc to count the open descriptors")
+    store = LocalDiskStore(tmp_path)
+    store.put(KEY, iter([os.urandom(200_000)]))
+    before = len(list(fds.iterdir()))
+
+    never_read = [store.open(KEY) for _ in range(20)]
+    assert len(list(fds.iterdir())) == before
+
+    started = store.open(KEY)
+    assert isinstance(started, Generator)
+    assert next(started)  # now the file is open ...
+    assert len(list(fds.iterdir())) == before + 1
+    started.close()  # ... and closing the stream (what a cancelled response does) closes it
+    assert len(list(fds.iterdir())) == before
+    exhausted = store.open(KEY)
+    assert sum(len(chunk) for chunk in exhausted) == 200_000
+    assert len(list(fds.iterdir())) == before
+    del never_read
 
 
 def test_what_is_not_there_is_not_found_and_delete_is_idempotent(tmp_path: Path) -> None:
