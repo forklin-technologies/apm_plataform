@@ -180,6 +180,7 @@ export function PainelShell({ session, example, section }: PainelShellProps) {
               <p className="mt-1 text-body text-ink-2">
                 {contextName} · {ROLE_LABELS[active.role]}
               </p>
+              <p className="mt-0.5 text-foot text-ink-2 lg:hidden">Conectado como {session.user.fullName}</p>
             </div>
             <div className="flex flex-col items-start gap-2 lg:hidden">
               <PrototypeBadge />

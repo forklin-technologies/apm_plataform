@@ -17,7 +17,7 @@ const COPY = {
 } as const;
 
 /**
- * Unica integracao REAL do prototipo: GET /api/health/ready (mesma origem).
+ * GET /api/health/ready (REAL, mesma origem).
  * Se a API cair, o chip muda de estado e o resto da pagina segue de pe.
  */
 export function ApiStatusChip({
