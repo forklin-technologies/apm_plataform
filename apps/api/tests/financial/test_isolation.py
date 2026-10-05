@@ -46,6 +46,10 @@ NOBODY: set[str] = set()
 # UPDATE policy (and a trigger refuses it as well).
 NEVER_UPDATED = {"expense_attachments", "audit_logs"}
 
+# Since 0008 (ADR-018) only the platform names the secret of a payment account (secret_ref is NOT
+# NULL and apm_app cannot write it), so the application role cannot insert one at all.
+APP_CANNOT = {("payment_accounts", "insert")}
+
 EXPECTED: dict[tuple[str, str], set[str]] = {}
 for _table in TABLES:
     EXPECTED[(_table, "select")] = SCHOOL_SCOPED
@@ -291,6 +295,8 @@ def test_application_role_matrix(
     context_name: str,
 ) -> None:
     expected = context_name in EXPECTED[(table, operation)]
+    if (table, operation) in APP_CANNOT:
+        expected = False  # a privilege the application role does not have (the owner still does)
 
     actual = _takes_effect(
         app_engine,

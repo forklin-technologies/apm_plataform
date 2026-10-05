@@ -24,6 +24,7 @@ from app.auth.permissions import (
     PermissionRequirement,
     PublicMarker,
 )
+from app.core.middleware import ORIGIN_EXEMPT_PATHS
 from app.main import create_app
 from tests.authsupport import Api, ApiFactory
 from tests.helpers import make_settings
@@ -211,6 +212,7 @@ def state_changing_routes(app: FastAPI) -> list[tuple[str, str]]:
         for context in effective_routes(app)
         if isinstance(context.original_route, APIRoute)
         for method in sorted((context.methods or set()) - SAFE_METHODS)
+        if (context.path or "") not in ORIGIN_EXEMPT_PATHS  # the webhooks: a server calls them
     ]
 
 
@@ -263,8 +265,28 @@ def test_the_public_routes_are_the_ones_listed_and_nothing_else_works_anonymousl
         ("POST", "/api/v1/auth/login"),
         ("POST", "/api/v1/auth/logout"),
         ("POST", "/api/v1/invitations/accept"),
+        # the public contribution flow, the webhooks of the Pix provider and the dev sandbox
+        ("GET", "/api/v1/public/schools/{slug}"),
+        ("POST", "/api/v1/public/schools/{slug}/contributions"),
+        ("GET", "/api/v1/public/schools/{slug}/contributions/{token}/charge"),
+        ("POST", "/api/v1/public/schools/{slug}/contributions/{token}/charges"),
+        ("GET", "/api/v1/public/schools/{slug}/contributions/{token}/receipt"),
+        ("POST", "/api/v1/webhooks/pix/sandbox"),
+        ("POST", "/api/v1/webhooks/pix/bb"),
+        ("POST", "/api/v1/dev/sandbox/pix/{txid}/pay"),
     }
     assert all(reason for reason in PUBLIC_ROUTES.values())  # each one says why
+
+
+def test_only_the_webhooks_are_exempt_from_the_origin_check_and_they_need_their_secret(
+    api: Api,
+) -> None:
+    assert {"/api/v1/webhooks/pix/sandbox", "/api/v1/webhooks/pix/bb"} == ORIGIN_EXEMPT_PATHS
+    for path in sorted(ORIGIN_EXEMPT_PATHS):
+        body = {"event_id": "e1", "txid": "a" * 32}
+        response = api.client.post(path, json=body)  # no Origin, no secret
+        assert response.status_code == 401, path
+        assert response.json()["code"] == "webhook_unauthorized", path
 
 
 # --- OpenAPI ------------------------------------------------------------------------------------
@@ -294,16 +316,19 @@ def test_every_operation_has_a_unique_operation_id_and_documents_its_errors(
             ids.append(operation["operationId"])
             if (method.upper(), path) not in PUBLIC_ROUTES:
                 assert "401" in operation["responses"], (method, path)
-            assert (
-                "application/problem+json"
-                in operation["responses"][
-                    "429"
-                    if path.endswith(("login", "accept", "password"))
-                    else "401"
-                    if "401" in operation["responses"]
-                    else "403"
-                ]["content"]
-            ), (method, path)
+            documented = (
+                "429"
+                if path.endswith(("login", "accept", "password"))
+                else "401"
+                if "401" in operation["responses"]
+                else "403"
+                if "403" in operation["responses"]
+                else "404"  # a public route that only answers "not found" (ADR-018)
+            )
+            assert "application/problem+json" in operation["responses"][documented]["content"], (
+                method,
+                path,
+            )
     assert len(ids) == len(set(ids)) and "auth_login" in ids and "invitations_create" in ids
 
 

@@ -78,6 +78,11 @@ EXPECTED_POLICIES: frozenset[tuple[str, str, str, str]] = frozenset(
         ("schools", "schools_definer_select", "SELECT", "apm_definer"),
         ("invitations", "invitations_definer_select", "SELECT", "apm_definer"),
         ("invitations", "invitations_definer_update", "UPDATE", "apm_definer"),
+        # 0008 (ADR-018): the three functions of the public flow.
+        ("schools", "schools_definer_select_public", "SELECT", "apm_definer"),
+        ("school_settings", "school_settings_definer_select", "SELECT", "apm_definer"),
+        ("payment_accounts", "payment_accounts_definer_select", "SELECT", "apm_definer"),
+        ("contributions", "contributions_definer_select", "SELECT", "apm_definer"),
         # 0007: a SELECT and an INSERT policy on each financial table, and an UPDATE one on every
         # table but the two that only grow (expense_attachments, audit_logs): 37. None of them is
         # open to apm_definer: the financial schema has no SECURITY DEFINER function.
@@ -94,14 +99,17 @@ EXPECTED_POLICIES: frozenset[tuple[str, str, str, str]] = frozenset(
 )
 
 # The SECURITY DEFINER functions that may exist, as `schema.name(argument types)`. The list is
-# closed on purpose: the three of TASK-004 (ADR-016); the financial schema (0007) has none, and a
-# later task adds its own by an ADR.
+# closed on purpose: the three of TASK-004 (ADR-016) and the three of the public flow (0008,
+# ADR-018); a later task adds its own by an ADR.
 ALLOWED_SECURITY_DEFINER: frozenset[str] = frozenset(
     {
         "public.find_login_identity(p_email text)",
         "public.list_memberships_for_user(p_user_id uuid)",
         "public.accept_invitation(p_token_hash bytea, p_full_name text, p_password_hash text, "
         "p_existing_user_id uuid)",
+        "public.resolve_school_public(p_slug text)",
+        "public.resolve_webhook_target(p_provider text, p_secret_hash text)",
+        "public.resolve_receipt(p_token_hash text)",
     }
 )
 
