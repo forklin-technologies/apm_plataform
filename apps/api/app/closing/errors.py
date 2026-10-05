@@ -23,17 +23,14 @@ def _facts(error: DBAPIError) -> tuple[str, str, str]:
     )
 
 
-def closing_refusal(error: DBAPIError, *, next_period: str | None = None) -> ProblemError | None:
+def closing_refusal(error: DBAPIError) -> ProblemError | None:
     """The problem for a refused INSERT into `monthly_closings`, or None for anything else (which
-    stays an internal error). `next_period` (YYYY-MM) comes from our query, not from Postgres."""
+    stays an internal error)."""
     _, constraint, message = _facts(error)
     if message.startswith("the period has not ended yet"):
         return ProblemError(409, "period_not_ended", "The month has not ended yet")
     if message.startswith("closings are sequential"):
-        detail = None if next_period is None else f"The next month to close is {next_period}"
-        return ProblemError(
-            409, "closing_out_of_sequence", "Months are closed in order", detail=detail
-        )
+        return ProblemError(409, "closing_out_of_sequence", "Months are closed in order")
     if constraint == "uq_monthly_closings_active_period":
         return ProblemError(409, "period_already_closed", "That month is already closed")
     if message.startswith("the school has no visible settings"):

@@ -4,7 +4,7 @@ from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy.exc import DBAPIError
+from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
 from app.auth.deps import Principal, require
 from app.auth.permissions import Permission, permissions_for
@@ -90,16 +90,31 @@ def create_closing(
         db.commit()
     except DBAPIError as error:
         db.rollback()
-        known = closing_refusal(error, next_period=_next_period(db, scope))
+        known = closing_refusal(error)
         if known is None:
             raise
+        if known.code == "closing_out_of_sequence":
+            known = _tell_the_next_period(db, scope, known)
         raise known from None
     return closing_detail(_load(db, scope, new_id), principal)
 
 
-def _next_period(db: TenantDb, scope: InSchool) -> str | None:
-    day = queries.next_period_to_close(db, scope.school_id)
-    return None if day is None else period_of(day)
+def _tell_the_next_period(db: TenantDb, scope: InSchool, refusal: ProblemError) -> ProblemError:
+    """Add the month that may be closed next to the refusal. Only the sequence refusal asks, and a
+    failure of this extra read never hides the refusal itself: it is answered as it was."""
+    try:
+        day = queries.next_period_to_close(db, scope.school_id)
+    except SQLAlchemyError:
+        db.rollback()
+        return refusal
+    if day is None:
+        return refusal
+    return ProblemError(
+        refusal.status,
+        refusal.code,
+        refusal.title,
+        detail=f"The next month to close is {period_of(day)}",
+    )
 
 
 @router.get(

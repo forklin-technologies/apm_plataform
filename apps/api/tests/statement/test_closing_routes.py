@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from sqlalchemy import Engine, text
 
+from app.closing import queries
 from tests.authsupport import Api
 from tests.statement.conftest import MARCH, Login, Scene
 
@@ -527,3 +528,48 @@ def test_closing_and_reopening_are_audited_with_the_person_who_did_it(
     assert {row.actor_type for row in rows} == {"USER"}
     assert rows[1].after_data["reopen_reason_present"] is True
     assert REASON not in str(rows[1].after_data)  # free text never reaches the audit log
+
+
+# --- the extra read of the sequence refusal --------------------------------------------------------
+
+
+def test_the_next_period_is_looked_up_only_for_the_sequence_refusal(
+    scene: Scene, login: Login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[uuid.UUID] = []
+    real = queries.next_period_to_close
+
+    def spy(db: Any, school_id: uuid.UUID) -> Any:
+        calls.append(school_id)
+        return real(db, school_id)
+
+    monkeypatch.setattr("app.closing.routes.queries.next_period_to_close", spy)
+    api = login(scene.users["treasurer"])
+
+    not_ended = close(api, scene, "2099-12")  # refused for another reason
+    ok = close(api, scene)
+    skipped = close(api, scene, "2025-05")  # the sequence refusal
+
+    assert not_ended.json()["code"] == "period_not_ended" and ok.status_code == 201
+    assert skipped.json()["code"] == "closing_out_of_sequence"
+    assert skipped.json()["detail"] == "The next month to close is 2025-04"
+    assert calls == [scene.fresh.school]  # once, for the sequence refusal only
+
+
+def test_a_failing_extra_read_never_masks_the_refusal(
+    scene: Scene, login: Login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def broken(db: Any, school_id: uuid.UUID) -> Any:
+        db.execute(text("SELECT * FROM a_table_that_does_not_exist"))
+
+    monkeypatch.setattr("app.closing.routes.queries.next_period_to_close", broken)
+    api = login(scene.users["treasurer"])
+    assert close(api, scene).status_code == 201
+
+    response = close(api, scene, "2025-05")
+
+    assert response.status_code == 409, response.text
+    body = response.json()
+    assert body["code"] == "closing_out_of_sequence"
+    assert "detail" not in body  # the month could not be looked up; the refusal still is the answer
+    assert "a_table_that_does_not_exist" not in response.text
