@@ -99,6 +99,6 @@ The reverse proxy must still set its own body limit above the file limit (see th
 ## Not done, on purpose
 
 - Returns (`REFUND`): M1.5. Bank fees and Pix direct: other tasks.
-- The **name** of an author or approver: the routes return user ids. The `users` table is invisible to the application role except for the caller's own row (row level security), so a name needs a decision of its own (a closed-list function, ADR-016).
+- The **name** of an author or approver: the routes return user ids only. The application role can read the users of its own school (policy `users_select`; the statement already shows a name that way), so adding `submitted_by_name` to the list and the detail is a join away, but it is a contract change for the web to ask for.
 - Rate limit of uploads, scanning of files for malware, an expiry of the files of a cancelled expense, a job that removes orphan files, a copy of the volume.
 - `Idempotency-Key` (ADR-017 asks it for **public** money): a person who sends the same expense twice gets two drafts; every action is safe to repeat (a second one is `409 invalid_state`).
