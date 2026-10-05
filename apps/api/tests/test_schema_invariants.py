@@ -344,7 +344,8 @@ EXPECTED_AUTH_CHECKS = {
     ),
     "ck_login_attempts_kind_valid": (
         "login_attempts",
-        "CHECK ((kind = ANY (ARRAY['login'::text, 'password'::text, 'invitation'::text])))",
+        "CHECK ((kind = ANY (ARRAY['login'::text, 'password'::text, 'invitation'::text, "
+        "'public_contribution'::text, 'public_token'::text, 'webhook'::text])))",
     ),
     "ck_login_attempts_hmacs_are_sha256": (
         "login_attempts",

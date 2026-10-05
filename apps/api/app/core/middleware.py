@@ -24,7 +24,11 @@ from app.auth.csrf import SAFE_METHODS
 from app.core.config import canonical_origin
 from app.core.errors import ProblemError, problem_response
 
-ORIGIN_EXEMPT_PATHS: frozenset[str] = frozenset()
+# The webhooks of the Pix provider are called by a server, not by a page: they have no Origin and
+# authenticate by their own secret (X-Webhook-Secret).
+ORIGIN_EXEMPT_PATHS: frozenset[str] = frozenset(
+    {"/api/v1/webhooks/pix/sandbox", "/api/v1/webhooks/pix/bb"}
+)
 
 
 class RequestIdMiddleware(BaseHTTPMiddleware):

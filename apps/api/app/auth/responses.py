@@ -31,9 +31,11 @@ PROBLEM_RESPONSES: dict[int | str, dict[str, Any]] = {
     for code, description in (
         (401, "unauthenticated, or the session was revoked or expired"),
         (403, "forbidden, csrf_failed or origin_not_allowed"),
+        (404, "not_found (one answer for every reason: unknown, foreign, expired or malformed)"),
         (409, "conflict"),
         (422, "validation_error"),
         (429, "rate_limited (see Retry-After)"),
+        (501, "provider_not_configured"),
     )
 }
 

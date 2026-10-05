@@ -15,6 +15,8 @@ its context and writes as apm_app under row level security.
 Also here:
 - `contributions.idempotency_key`: the Idempotency-Key of the public POST, unique PER SCHOOL (never
   global: the M1 lesson), written once with the contribution and never changed;
+- the attempt counters of `login_attempts` learn three kinds (public_contribution, public_token,
+  webhook) so the public routes are rate limited per client address;
 - `payment_accounts.secret_ref` is no longer writable by apm_app: only the platform (the admin of the
   migrations and the seed, later a platform flow) names the secret an account uses, so a school
   cannot point its account at the secret of another school.
@@ -126,6 +128,13 @@ def upgrade() -> None:
         "GRANT SELECT (idempotency_key), INSERT (idempotency_key) ON contributions TO apm_app"
     )
 
+    # --- the public routes count their own attempts per client address (login_attempts, HMACs only)
+    op.execute("ALTER TABLE login_attempts DROP CONSTRAINT ck_login_attempts_kind_valid")
+    op.execute(
+        "ALTER TABLE login_attempts ADD CONSTRAINT ck_login_attempts_kind_valid CHECK (kind IN "
+        "('login', 'password', 'invitation', 'public_contribution', 'public_token', 'webhook'))"
+    )
+
     # --- only the platform names the secret of a payment account
     op.execute("REVOKE INSERT (secret_ref), UPDATE (secret_ref) ON payment_accounts FROM apm_app")
 
@@ -182,6 +191,12 @@ def downgrade() -> None:
     op.execute("REVOKE CREATE ON SCHEMA public FROM apm_definer")
 
     op.execute("SET LOCAL ROLE apm_owner")
+    op.execute("DELETE FROM login_attempts WHERE kind NOT IN ('login', 'password', 'invitation')")
+    op.execute("ALTER TABLE login_attempts DROP CONSTRAINT ck_login_attempts_kind_valid")
+    op.execute(
+        "ALTER TABLE login_attempts ADD CONSTRAINT ck_login_attempts_kind_valid "
+        "CHECK (kind IN ('login', 'password', 'invitation'))"
+    )
     for table, policy in reversed(POLICIES):
         op.execute(f"DROP POLICY IF EXISTS {policy} ON {table}")
     op.execute("REVOKE ALL ON school_settings FROM apm_definer")
