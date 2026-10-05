@@ -4,6 +4,8 @@ Parameters are the OWASP minimum for Argon2id (19 MiB of memory, 2 iterations, 1
 this module logs, formats or raises with a password or a hash in the message.
 """
 
+import base64
+import binascii
 import secrets
 
 from argon2 import PasswordHasher, Type, extract_parameters
@@ -35,12 +37,40 @@ def verify_hash(stored_hash: str, password: str) -> bool:
 _DUMMY_HASH = hash_password(secrets.token_urlsafe(32))
 
 
+# What a stored hash must look like to be worth verifying. A value that Argon2 can PARSE but not
+# verify (a short salt, p=0, a memory cost of a terabyte) fails in microseconds, or tries a huge
+# allocation, so it is treated like any other damaged value: the dummy hash is verified instead.
+_MAX_MEMORY_KIB = 1 << 20  # 1 GiB
+_MAX_TIME_COST = 10
+_MAX_PARALLELISM = 16
+_MIN_SALT_BYTES = 8
+_MIN_DIGEST_BYTES = 4
+
+
+def _decoded_length(segment: str) -> int:
+    try:
+        return len(base64.b64decode(segment + "=" * (-len(segment) % 4), validate=True))
+    except (binascii.Error, ValueError):
+        return 0
+
+
 def _is_argon2_hash(value: str) -> bool:
     try:
-        extract_parameters(value)
+        parameters = extract_parameters(value)
     except InvalidHashError:
         return False
-    return True
+    if not (
+        1 <= parameters.time_cost <= _MAX_TIME_COST
+        and 1 <= parameters.parallelism <= _MAX_PARALLELISM
+        and 8 * parameters.parallelism <= parameters.memory_cost <= _MAX_MEMORY_KIB
+    ):
+        return False
+    segments = value.split("$")  # "", "argon2id", "v=19", "m=...,t=...,p=...", salt, digest
+    return (
+        len(segments) == 6
+        and _decoded_length(segments[4]) >= _MIN_SALT_BYTES
+        and _decoded_length(segments[5]) >= _MIN_DIGEST_BYTES
+    )
 
 
 def check_password(stored_hash: str | None, password: str) -> bool:

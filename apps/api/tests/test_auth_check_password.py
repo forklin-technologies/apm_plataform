@@ -16,6 +16,13 @@ UNPARSABLE = [
     "$argon2id$v=19$m=19456,t=2,p=1$onlytwo",
     "$2b$12$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ0123456",  # bcrypt, not Argon2
     "x" * 300,
+    # Well-shaped for Argon2's parser but not verifiable: they used to fail in microseconds
+    # (review of 2026-10-05), which told a damaged row apart from a wrong password.
+    "$argon2id$v=19$m=19456,t=2,p=1$aaaa$bbbb",  # salt too short
+    "$argon2id$v=19$m=19456,t=2,p=0$c29tZXNhbHRzb21l$YWJjZGVmZ2g",  # no lanes
+    "$argon2id$v=19$m=999999999,t=2,p=1$c29tZXNhbHRzb21l$YWJjZGVmZ2hpamts",  # about a terabyte
+    "$argon2id$v=19$m=19456,t=0,p=1$c29tZXNhbHRzb21l$YWJjZGVmZ2hpamts",  # no passes
+    "$argon2id$v=19$m=19456,t=2,p=1$c29tZXNhbHRzb21l$***not-base64***",
 ]
 
 
