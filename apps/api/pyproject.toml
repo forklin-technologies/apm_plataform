@@ -45,3 +45,8 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "S", "C4"]
 python_version = "3.12"
 strict = true
 files = ["app", "migrations", "tests"]
+
+[[tool.mypy.overrides]]
+# reportlab ships no type information.
+module = ["reportlab", "reportlab.*"]
+ignore_missing_imports = true

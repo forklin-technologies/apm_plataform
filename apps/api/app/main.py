@@ -12,6 +12,7 @@ from app.core.errors import install_error_handlers
 from app.core.middleware import OriginCheckMiddleware, RequestIdMiddleware
 from app.db.posture import PostureError, assert_posture
 from app.db.session import build_engine, build_session_factory
+from app.reports.routes import router as reports_router
 from app.routers.api import api_router
 from app.statement.routes import router as statement_router
 
@@ -58,6 +59,7 @@ def create_app(
     app.include_router(api_router)
     app.include_router(statement_router)
     app.include_router(closing_router)
+    app.include_router(reports_router)
     _document_security(app, settings)
     return app
 

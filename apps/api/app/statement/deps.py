@@ -62,17 +62,19 @@ class SchoolScope:
     timezone: str
 
 
-def responses_of(*codes: int) -> dict[int | str, dict[str, Any]]:
+def responses_of(
+    *codes: int, extra: dict[int | str, dict[str, Any]] | None = None
+) -> dict[int | str, dict[str, Any]]:
     """The OpenAPI `responses` of a route of this package: the shared problem answers, plus 404 (the
     school or the closing is not there, or is not the caller's)."""
-    extra: dict[int | str, dict[str, Any]] = {}
+    added: dict[int | str, dict[str, Any]] = dict(extra or {})
     if 404 in codes:
-        extra[404] = {
+        added[404] = {
             "model": Problem,
             "description": "not_found: no such school or record, or not one of the caller's",
             "content": {PROBLEM_MEDIA_TYPE: {"schema": {"$ref": "#/components/schemas/Problem"}}},
         }
-    return problem_responses(*(code for code in codes if code != 404), extra=extra)
+    return problem_responses(*(code for code in codes if code != 404), extra=added)
 
 
 def not_found() -> ProblemError:
