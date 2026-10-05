@@ -12,6 +12,7 @@ from app.core.middleware import OriginCheckMiddleware, RequestIdMiddleware
 from app.db.posture import PostureError, assert_posture
 from app.db.session import build_engine, build_session_factory
 from app.routers.api import api_router
+from app.statement.routes import router as statement_router
 
 
 def create_app(
@@ -54,6 +55,7 @@ def create_app(
     app.add_middleware(OriginCheckMiddleware, allowed_origins=settings.allowed_origins)
     app.add_middleware(RequestIdMiddleware)
     app.include_router(api_router)
+    app.include_router(statement_router)
     _document_security(app, settings)
     return app
 
