@@ -22,6 +22,7 @@ from tests.financial.support import (
     add_collaborator_expense,
     add_expense,
     add_refund,
+    check_consistency,
     make_school,
     utc,
 )
@@ -211,3 +212,93 @@ def login(apis: ApiFactory) -> Login:
 
 def statement_path(school: uuid.UUID, tail: str = "") -> str:
     return f"/api/v1/schools/{school}/statement{tail}"
+
+
+# --- the contributions of a month, for the contributions report -----------------------------------
+# March 2025, in the cash ledger (group CONTRIBUTIONS, section A), in this order:
+#   02/03 Pix pela plataforma 2000 (no name: anonymous)    03/03 dinheiro 2000 Maria Exemplo (aluno, turma)
+#   04/03 Pix direto 3000 João Teste                       05/03 transferência 3000 Carla Teste
+#   06/03 dinheiro 4000 Pedro Quatro                       07/03 dinheiro 1500 Ana Quinze
+# Section B (another income group): 08/03 a donation of 10000 in cash from Doador Generoso.
+# Outside March: 5000 in February and 700 in April. Then, NOW (the current month): a late
+# adjustment (a cash contribution of March settled after March was closed: booked now, flagged), and
+# three that are not in the ledger: a Pix waiting for payment (2500), one in review (3000, 3500
+# received) and a cancelled one (900).
+LATE_AMOUNT = 700
+OUTSIDE_NOW = (2500, 3000, 900)
+
+
+def build_contributions(conn: Connection, f: Fresh) -> dict[str, uuid.UUID]:
+    from tests.financial.support import (
+        add_direct_pix,
+        add_pix_contribution,
+        add_pix_review,
+        set_status,
+    )
+
+    e: dict[str, uuid.UUID] = {}
+    add_cash_contribution(conn, f, 5000, utc(2025, 2, 10, 12), guardian="Ana Antiga")
+    e["pix"], _ = add_pix_contribution(conn, f, 2000, paid_at=utc(2025, 3, 2, 12))
+    e["maria"] = add_cash_contribution(
+        conn,
+        f,
+        2000,
+        utc(2025, 3, 3, 12),
+        guardian="Maria Exemplo",
+        student="Aluno Um",
+        class_name="5º A",
+    )
+    e["direct"] = add_direct_pix(
+        conn, f, 3000, settled_at=utc(2025, 3, 4, 12), guardian="João Teste"
+    )
+    e["carla"] = add_cash_contribution(
+        conn, f, 3000, utc(2025, 3, 5, 12), guardian="Carla Teste", method="TRANSFER"
+    )
+    e["pedro"] = add_cash_contribution(conn, f, 4000, utc(2025, 3, 6, 12), guardian="Pedro Quatro")
+    e["ana"] = add_cash_contribution(conn, f, 1500, utc(2025, 3, 7, 12), guardian="Ana Quinze")
+    e["donation"] = add_cash_contribution(
+        conn, f, 10000, utc(2025, 3, 8, 12), guardian="Doador Generoso", category=f.cat_other
+    )
+    add_cash_contribution(conn, f, 700, utc(2025, 4, 2, 12), guardian="Beatriz Abril")
+    # Close March, so that the next settlement dated in March is booked late.
+    check_consistency(conn)
+    conn.execute(
+        text(
+            "INSERT INTO monthly_closings (organization_id, school_id, period_start, closed_by_user_id) "
+            "VALUES (:o, :s, '2025-03-01', :u)"
+        ),
+        {"o": f.org, "s": f.school, "u": f.treasurer},
+    )
+    e["late"] = add_cash_contribution(
+        conn, f, LATE_AMOUNT, utc(2025, 3, 20, 12), guardian="Tardia Silva"
+    )
+    e["waiting"], _ = add_pix_contribution(conn, f, OUTSIDE_NOW[0])
+    e["review"], _ = add_pix_review(conn, f, OUTSIDE_NOW[1], 3500)
+    e["cancelled"], _ = add_pix_contribution(conn, f, OUTSIDE_NOW[2])
+    set_status(conn, e["cancelled"], "CANCELLED")
+    return e
+
+
+@pytest.fixture
+def contrib_scene(admin_engine: Engine) -> Iterator[Scene]:
+    with admin_engine.begin() as conn:
+        fresh = make_school(conn)
+        suffix = _suffix_of(conn, fresh)
+        users = _school_people(conn, fresh, suffix)
+        entries = build_contributions(conn, fresh)
+        other = make_school(conn)
+        other_suffix = _suffix_of(conn, other)
+        other_users = _school_people(conn, other, other_suffix)
+        add_cash_contribution(conn, other, 99900, utc(2025, 3, 8, 12), guardian="Pessoa Alheia")
+        sibling = uuid.uuid4()
+        conn.execute(
+            text(
+                "INSERT INTO schools (id, organization_id, name, slug) VALUES (:id, :org, 'Sibling', :slug)"
+            ),
+            {"id": sibling, "org": fresh.org, "slug": f"t5-sib-{suffix}"},
+        )
+        conn.exec_driver_sql("SET CONSTRAINTS ALL IMMEDIATE")
+    try:
+        yield Scene(fresh, suffix, users, entries, other, other_users, sibling)
+    finally:
+        drop_scene(admin_engine, [(fresh, suffix), (other, other_suffix)])
