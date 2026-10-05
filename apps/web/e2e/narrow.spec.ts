@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { demoPassword, loginAs } from "./auth-helpers";
 
 /**
  * N5 e N4: telas estreitas (320 e 360 px) sem rolagem horizontal nem rotulo truncado, payload do Pix
@@ -11,14 +12,14 @@ const routes = [
   "/apm/escola-horizonte",
   "/apm/emei-vale-verde",
   "/apm/escola-exemplo/pedido/demo-comprovante-0001",
-  "/painel",
-  "/painel?tipo=contribuicoes",
-  "/painel?tipo=despesas",
-  "/painel?tipo=reembolsos",
-  "/painel?tipo=devolucoes",
   "/login",
+  "/accept-invitation",
+  "/accept-invitation?token=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
   "/apm/nao-existe",
 ];
+
+// O painel exige sessao: estas rotas so rodam com a API real e a senha de demonstracao (e2e/auth-helpers.ts).
+const painelRoutes = ["/painel", "/painel?tipo=contribuicoes", "/painel?tipo=despesas", "/painel?tipo=reembolsos", "/painel?tipo=devolucoes"];
 
 async function overflow(page: Page) {
   return page.evaluate(() => {
@@ -60,8 +61,20 @@ for (const width of [320, 360]) {
       }
     });
 
+    test("sem rolagem horizontal e sem elemento fora da borda no painel (logado)", async ({ page }) => {
+      test.skip(!demoPassword(), "sem E2E_DEMO_PASSWORD_FILE/E2E_DEMO_PASSWORD");
+      await loginAs(page);
+      for (const route of painelRoutes) {
+        await page.goto(route);
+        await page.waitForLoadState("networkidle");
+        const o = await overflow(page);
+        expect(o, route).toEqual({ scroll: 0, outside: [] });
+      }
+    });
+
     test("barra de abas do painel: nenhum rotulo truncado (nem 'Contribuições')", async ({ page }) => {
-      await page.goto("/painel");
+      test.skip(!demoPassword(), "sem E2E_DEMO_PASSWORD_FILE/E2E_DEMO_PASSWORD");
+      await loginAs(page);
       const labels = await page.evaluate(() =>
         [...document.querySelectorAll<HTMLElement>("nav[aria-label='Seções do painel'] a > span:last-child")].map((el) => ({
           text: el.textContent,
@@ -77,7 +90,8 @@ for (const width of [320, 360]) {
     });
 
     test("cartao 'Saldo' do painel cabe e o numero nao e cortado", async ({ page }) => {
-      await page.goto("/painel");
+      test.skip(!demoPassword(), "sem E2E_DEMO_PASSWORD_FILE/E2E_DEMO_PASSWORD");
+      await loginAs(page);
       const fit = await page.evaluate(() => {
         const number = [...document.querySelectorAll("p")].find((p) => /^R\$\s?10\.872,20$/.test((p.textContent ?? "").trim()))!;
         const card = number.closest("section")!;
@@ -190,7 +204,12 @@ test.describe("N4: barra superior translucida", () => {
   for (const scheme of ["light", "dark"] as const) {
     test(`alpha de base >= 0,9 (${scheme}) no portal da escola e no painel`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: scheme });
-      for (const route of ["/apm/escola-exemplo", "/painel"]) {
+      const routes = ["/apm/escola-exemplo"];
+      if (demoPassword()) {
+        await loginAs(page);
+        routes.push("/painel");
+      }
+      for (const route of routes) {
         await page.goto(route);
         const alphas = await page.evaluate(() =>
           // barras de navegacao (topo, abas, lateral); a barra de acoes do formulario e transparente no desktop de proposito

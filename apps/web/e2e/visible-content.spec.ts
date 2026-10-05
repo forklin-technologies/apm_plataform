@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { ANA, demoPassword, loginAs } from "./auth-helpers";
 import {
   applyScenario,
   cspViolations,
@@ -47,6 +48,8 @@ for (const scenario of scenarios) {
       for (const [path, label] of [
         ["/", "entrada"],
         ["/login", "login"],
+        ["/accept-invitation", "convite sem token"],
+        ["/accept-invitation?token=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG", "convite"],
         ["/apm/nao-existe", "404 da escola"],
         ["/pagina-que-nao-existe", "404 geral"],
       ] as const) {
@@ -105,20 +108,18 @@ for (const scenario of scenarios) {
       }
     });
 
-    test("painel: resumo, abas, seletor e estados de carregamento e vazio", async ({ page }) => {
-      await page.goto("/painel");
+    test("painel (logado): resumo, abas e seletor de vinculos", async ({ page }) => {
+      test.skip(!demoPassword(), "sem E2E_DEMO_PASSWORD_FILE/E2E_DEMO_PASSWORD");
+      await loginAs(page);
       await expectVisible(page, "painel resumo", scenario);
       for (const tipo of ["contribuicoes", "despesas", "reembolsos", "devolucoes"]) {
         await page.goto(`/painel?tipo=${tipo}`);
         await expectVisible(page, `painel ${tipo}`, scenario);
       }
       await page.goto("/painel");
-      await page.getByRole("button", { name: /Escola Exemplo/ }).first().click();
-      await expect(page.getByRole("button", { name: /EMEI Vale Verde/ })).toBeVisible();
-      await expectVisible(page, "seletor de escola aberto", scenario);
-      await page.getByRole("button", { name: /EMEI Vale Verde/ }).click();
-      await expect(page.getByRole("heading", { name: /Nenhuma movimentação/ })).toBeVisible();
-      await expectVisible(page, "painel vazio", scenario);
+      await page.getByRole("button", { name: new RegExp(ANA.organization) }).first().click();
+      await expect(page.getByRole("group", { name: ANA.organization })).toBeVisible();
+      await expectVisible(page, "seletor de vinculos aberto", scenario);
     });
   });
 }
