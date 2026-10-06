@@ -182,5 +182,23 @@ export function apiUpload<T>(
 
 /** GET de um arquivo (PDF, anexo) pela API, com o cookie de sessao. Nunca ha URL publica do arquivo. */
 export function apiBlob(path: string, options: RequestOptions = {}): Promise<ApiResult<BlobPayload>> {
-  return request(path, { method: "GET", csrf: false, blob: true }, (payload) => (payload instanceof Object && "blob" in payload && payload.blob instanceof Blob ? (payload as BlobPayload) : null), options, UPLOAD_TIMEOUT_MS);
+  return request(path, { method: "GET", csrf: false, blob: true }, (payload) => (isBlobPayload(payload) ? payload : null), options, UPLOAD_TIMEOUT_MS);
+}
+
+/**
+ * Confere pela forma, nao por `instanceof Blob`: `response.blob()` pode devolver o Blob do runtime
+ * (Node) enquanto o `Blob` global e o do jsdom, e a checagem de classe falha so em algumas versoes do Node.
+ */
+function isBlobPayload(payload: unknown): payload is BlobPayload {
+  if (typeof payload !== "object" || payload === null || !("blob" in payload) || !("contentType" in payload)) return false;
+  const { blob, contentType } = payload as { blob: unknown; contentType: unknown };
+  return (
+    typeof contentType === "string" &&
+    typeof blob === "object" &&
+    blob !== null &&
+    typeof (blob as Blob).size === "number" &&
+    typeof (blob as Blob).type === "string" &&
+    typeof (blob as Blob).slice === "function" &&
+    typeof (blob as Blob).text === "function"
+  );
 }
