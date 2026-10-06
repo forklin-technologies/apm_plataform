@@ -29,15 +29,15 @@ test.describe("com a senha de demonstracao", () => {
   test.skip(!demoPassword() || !apiAcceptsThisOrigin(), "sem a senha de demonstracao ou fora de :3100/:3101");
 
   test("login real, painel com nome e vinculo reais, sair e /painel volta para /login", async ({ page }) => {
-    await loginAs(page);
+    await loginAs(page, ANA.email);
 
     // nome e vinculo REAIS (vindos de GET /auth/me)
     await expect(page.getByText(ANA.name).locator("visible=true").first()).toBeVisible();
     await expect(page.getByText(ANA.organization).locator("visible=true").first()).toBeVisible();
     await expect(page.getByRole("heading", { name: "Resumo" })).toBeVisible();
 
-    // os dados financeiros continuam simulados e marcados
-    await expect(page.getByRole("note").filter({ hasText: "Protótipo" })).toBeVisible();
+    // vinculo da organizacao inteira: o painel e de uma escola, entao explica em vez de mostrar numeros
+    await expect(page.getByRole("note").filter({ hasText: "Esta conta é da organização inteira" })).toBeVisible();
 
     // a pagina nunca leu o cookie de sessao (HttpOnly): so o CSRF e legivel
     const names = (await page.context().cookies()).map((c) => c.name);

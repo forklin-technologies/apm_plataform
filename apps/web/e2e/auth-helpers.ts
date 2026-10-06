@@ -22,8 +22,12 @@ export function demoPassword(): string | null {
 }
 
 export const ANA = { email: "ana.admin@example.test", name: "Ana Administradora (demo)", organization: "Rede Escolar Demo" };
+/** Tesoureira da Escola Aurora (demo): tem statement:read, contributions:record_cash e reports:read. */
+export const CARLA = { email: "carla.tesoureira@example.test", name: "Carla Tesoureira (demo)", organization: "Rede Escolar Demo", school: "Escola Aurora (demo)" };
+/** Leitora da Escola Horizonte (demo): so reports:read_aggregate (o resumo do mes). */
+export const ELISA = { email: "elisa.leitora@example.test", school: "Escola Horizonte (demo)" };
 
-export async function loginAs(page: Page, email = ANA.email): Promise<void> {
+export async function loginAs(page: Page, email = CARLA.email): Promise<void> {
   const password = demoPassword();
   if (!password) throw new Error("Defina E2E_DEMO_PASSWORD_FILE (ou E2E_DEMO_PASSWORD) para os testes com login.");
   await page.goto("/login");

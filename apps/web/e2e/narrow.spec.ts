@@ -86,12 +86,13 @@ for (const width of [320, 360]) {
       }
     });
 
-    test("cartao 'Saldo' do painel cabe e o numero nao e cortado", async ({ page }) => {
+    test("cartao 'Saldo em caixa' do painel cabe e o numero nao e cortado", async ({ page }) => {
       test.skip(!demoPassword(), "sem E2E_DEMO_PASSWORD_FILE/E2E_DEMO_PASSWORD");
       await loginAs(page);
+      await expect(page.getByText(/Saldo em caixa em/)).toBeVisible();
       const fit = await page.evaluate(() => {
-        const number = [...document.querySelectorAll("p")].find((p) => /^R\$\s?10\.872,20$/.test((p.textContent ?? "").trim()))!;
-        const card = number.closest("section")!;
+        const card = document.querySelector("#indicators-title")!.closest("section")!;
+        const number = [...card.querySelectorAll("p")].find((p) => /^R\$\s?[\d.]+,\d{2}$/.test((p.textContent ?? "").trim()))!;
         return { numberRight: number.getBoundingClientRect().right, cardRight: card.getBoundingClientRect().right, scroll: number.scrollWidth - number.clientWidth, vw: document.documentElement.clientWidth };
       });
       expect(fit.scroll).toBeLessThanOrEqual(0);
