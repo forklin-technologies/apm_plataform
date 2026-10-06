@@ -3,7 +3,7 @@
  * que a camada de dados devolveu. Status desconhecido nao vira "pago" em hipotese alguma.
  */
 
-export type PixChargeStatus = "PENDING" | "PAID" | "EXPIRED" | "CANCELLED";
+export type PixChargeStatus = "PENDING" | "PAID" | "REVIEW_REQUIRED" | "EXPIRED" | "CANCELLED";
 
 export type MovementKind = "CONTRIBUTION" | "EXPENSE" | "REIMBURSEMENT" | "REFUND";
 export type MovementStatus = "PENDING" | "APPROVED" | "CONFIRMED" | "REJECTED" | "CANCELLED" | "EXPIRED";
@@ -19,7 +19,7 @@ export interface StatusView {
   final: boolean;
 }
 
-const PIX_STATUSES: readonly PixChargeStatus[] = ["PENDING", "PAID", "EXPIRED", "CANCELLED"];
+const PIX_STATUSES: readonly PixChargeStatus[] = ["PENDING", "PAID", "REVIEW_REQUIRED", "EXPIRED", "CANCELLED"];
 
 /** Valida um valor vindo da camada de dados. Desconhecido vira null (nunca PAID). */
 export function parsePixStatus(raw: unknown): PixChargeStatus | null {
@@ -46,6 +46,13 @@ export function pixStatusView(status: PixChargeStatus | null): StatusView {
         description: "O Pix foi cancelado e nenhum valor foi cobrado.",
         final: true,
       };
+    case "REVIEW_REQUIRED":
+      return {
+        label: "Em análise",
+        tone: "warning",
+        description: "O pagamento está em análise pela escola. A contribuição ainda não foi confirmada.",
+        final: false,
+      };
     case "PENDING":
       return {
         label: "Aguardando pagamento",
@@ -61,6 +68,43 @@ export function pixStatusView(status: PixChargeStatus | null): StatusView {
         final: false,
       };
   }
+}
+
+// ---------------------------------------------------------------- contribuicao (portal publico)
+
+export type ContributionStatus = "PENDING_PAYMENT" | "PAID" | "REVIEW_REQUIRED" | "EXPIRED" | "CANCELLED";
+
+const CONTRIBUTION_STATUSES: readonly ContributionStatus[] = [
+  "PENDING_PAYMENT",
+  "PAID",
+  "REVIEW_REQUIRED",
+  "EXPIRED",
+  "CANCELLED",
+];
+
+/** Status da contribuicao vindo da API. Desconhecido vira null (nunca PAID). */
+export function parseContributionStatus(raw: unknown): ContributionStatus | null {
+  return typeof raw === "string" && (CONTRIBUTION_STATUSES as readonly string[]).includes(raw)
+    ? (raw as ContributionStatus)
+    : null;
+}
+
+/**
+ * O que a tela da familia mostra. REGRA: "paid" so quando a CONTRIBUICAO veio PAID da API: uma
+ * cobranca PAID sozinha (corrida entre as duas leituras) continua "waiting". Em duvida, nao e pago.
+ */
+export type PaymentPhase = "waiting" | "paid" | "review" | "expired" | "closed";
+
+export function paymentPhase(state: {
+  status: ContributionStatus;
+  charge: { status: PixChargeStatus } | null;
+}): PaymentPhase {
+  if (state.status === "PAID") return "paid";
+  if (state.status === "REVIEW_REQUIRED" || state.charge?.status === "REVIEW_REQUIRED") return "review";
+  if (state.status === "CANCELLED" || state.status === "EXPIRED") return "closed";
+  if (state.charge === null) return "closed";
+  if (state.charge.status === "EXPIRED" || state.charge.status === "CANCELLED") return "expired";
+  return "waiting";
 }
 
 export const KIND_LABELS: Record<MovementKind, string> = {

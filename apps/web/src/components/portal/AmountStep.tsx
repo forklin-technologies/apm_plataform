@@ -10,6 +10,13 @@ import { StickyActions } from "./FlowChrome";
 
 export const CUSTOM_CHOICE = "custom";
 
+/** Identificador da opcao de um valor sugerido: o proprio valor em centavos. */
+export const suggestedChoice = (cents: number) => `suggested-${cents}`;
+export function suggestedCents(choice: string | null): number | null {
+  const match = choice === null ? null : /^suggested-(\d+)$/.exec(choice);
+  return match ? Number(match[1]) : null;
+}
+
 interface ChoiceRowProps {
   value: string;
   checked: boolean;
@@ -90,7 +97,8 @@ export function AmountStep({
     previous.current = choice;
   }, [choice]);
 
-  const { minCents, maxCents } = school.customAmount;
+  const minCents = school.minAmountCents;
+  const maxCents = school.maxAmountCents;
   const customSelected = choice === CUSTOM_CHOICE;
 
   // Erro de valor livre: o foco vai para o campo (leitores de tela leem o erro via aria-describedby).
@@ -113,29 +121,34 @@ export function AmountStep({
         Quanto você quer contribuir?
       </h2>
       <p className="mt-2 max-w-[52ch] text-body text-ink-2">
-        Escolha uma das cotas da {school.apmName} ou informe outro valor. O dinheiro vai direto para a conta da APM.
+        {school.allowCustomAmount
+          ? `Escolha um dos valores sugeridos pela ${school.apmName} ou informe outro valor.`
+          : `Escolha um dos valores sugeridos pela ${school.apmName}.`}{" "}
+        O dinheiro vai direto para a conta da APM.
       </p>
 
       <div role="radiogroup" aria-labelledby="amount-heading" className="mt-6 space-y-3">
-        {school.quotas.map((quota) => (
+        {school.suggestedAmountsCents.map((cents) => (
           <ChoiceRow
-            key={quota.id}
-            value={quota.id}
-            checked={choice === quota.id}
-            title={quota.name}
-            description={quota.description}
-            trailing={formatBRL(quota.amountCents)}
+            key={cents}
+            value={suggestedChoice(cents)}
+            checked={choice === suggestedChoice(cents)}
+            title={formatBRL(cents)}
+            description="Valor sugerido pela APM"
+            trailing=""
             onSelect={onChoice}
           />
         ))}
-        <ChoiceRow
-          value={CUSTOM_CHOICE}
-          checked={customSelected}
-          title="Outro valor"
-          description={`Entre ${formatBRL(minCents)} e ${formatBRL(maxCents)}`}
-          trailing=""
-          onSelect={onChoice}
-        />
+        {school.allowCustomAmount && (
+          <ChoiceRow
+            value={CUSTOM_CHOICE}
+            checked={customSelected}
+            title="Outro valor"
+            description={`Entre ${formatBRL(minCents)} e ${formatBRL(maxCents)}`}
+            trailing=""
+            onSelect={onChoice}
+          />
+        )}
       </div>
 
       {customSelected && (

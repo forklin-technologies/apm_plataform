@@ -20,6 +20,8 @@ export interface RequestOptions {
 export interface SendOptions extends RequestOptions {
   /** Sobrescreve o token CSRF (testes). `undefined` = ler do cookie; `null` = nao enviar. */
   csrfToken?: string | null;
+  /** Cabecalhos extras (ex.: Idempotency-Key). Nunca sobrescrevem Accept, Content-Type nem X-CSRF-Token. */
+  headers?: Record<string, string>;
 }
 
 const DEFAULT_TIMEOUT_MS = 5000;
@@ -92,7 +94,7 @@ async function request<T>(
   if (signal?.aborted) controller.abort();
 
   try {
-    const headers: Record<string, string> = { Accept: "application/json" };
+    const headers: Record<string, string> = { ...options.headers, Accept: "application/json" };
     if (init.body !== undefined) headers["Content-Type"] = "application/json";
     if (init.csrf) {
       const token = options.csrfToken === undefined ? readCsrfToken() : options.csrfToken;

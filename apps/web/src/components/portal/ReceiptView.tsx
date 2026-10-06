@@ -1,11 +1,12 @@
 "use client";
 
 import { notFound } from "next/navigation";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { CheckIcon, CopyIcon, LockIcon } from "@/components/ui/icons";
 import { api } from "@/lib/api";
 import type { Receipt } from "@/lib/api/types";
+import { formatWait } from "@/lib/auth-messages";
 import { ReceiptCard } from "./ReceiptCard";
 
 type ViewState =
@@ -13,12 +14,13 @@ type ViewState =
   | { kind: "receipt"; receipt: Receipt }
   | { kind: "unconfirmed" }
   | { kind: "not-found" }
-  | { kind: "error" };
+  | { kind: "error"; message: string };
 
 /**
- * Comprovante. O servidor so entrega o que a camada de dados confirmou la (o link de exemplo); para
- * qualquer outro token o HTML e NEUTRO ("Conferindo seu comprovante") e quem responde e a camada de
- * dados, no navegador. Nunca se afirma "Pago" nem se mostram dados de pessoa sem essa resposta.
+ * Comprovante. O servidor entrega a pagina ja com o que a API respondeu (200 pago, 409 ainda nao, 404
+ * vira a 404 do site); sem resposta definitiva, o HTML e NEUTRO ("Conferindo seu comprovante") e o
+ * navegador consulta. Nunca se afirma "Pago" sem o 200 da API. O token so existe na URL desta pagina e
+ * na memoria dela: nada em storage.
  */
 export function ReceiptView({
   slug,
@@ -27,33 +29,39 @@ export function ReceiptView({
 }: {
   slug: string;
   token: string;
-  initial: Receipt | null;
+  initial: { receipt: Receipt } | { unconfirmed: true } | null;
 }) {
-  const [view, setView] = useState<ViewState>(initial ? { kind: "receipt", receipt: initial } : { kind: "checking" });
+  const [view, setView] = useState<ViewState>(
+    initial === null
+      ? { kind: "checking" }
+      : "receipt" in initial
+        ? { kind: "receipt", receipt: initial.receipt }
+        : { kind: "unconfirmed" },
+  );
   const [attempt, setAttempt] = useState(0);
   const [copied, setCopied] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useLayoutEffect(() => {
+    // O servidor ja trouxe a resposta definitiva da API (200 ou 409): so consulta de novo se a pessoa pedir.
+    if (attempt === 0 && initial !== null) return;
     let cancelled = false;
-    void api.contributions.getReceipt(slug, token).then((result) => {
+    void api.public.receipt(slug, token).then((result) => {
       if (cancelled) return;
       if (result.ok) setView({ kind: "receipt", receipt: result.data });
-      else if (result.error.kind === "not-found") setView({ kind: "not-found" });
+      else if (result.error.status === 404) setView({ kind: "not-found" });
       else if (result.error.status === 409) setView({ kind: "unconfirmed" });
-      else setView({ kind: "error" });
+      else if (result.error.code === "rate_limited") {
+        setView({ kind: "error", message: `Muitas consultas seguidas. Aguarde ${formatWait(result.error.retryAfterSeconds)} e tente de novo.` });
+      } else setView({ kind: "error", message: "Houve uma falha ao buscar o comprovante. Tente de novo em instantes." });
     });
     return () => {
       cancelled = true;
       clearTimeout(timer.current);
     };
+    // `initial` so vale na primeira consulta.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [slug, token, attempt]);
-
-  // Dado de crianca: depois de MOSTRAR o comprovante, apaga do navegador responsavel, aluno e turma.
-  const shown = view.kind === "receipt";
-  useEffect(() => {
-    if (shown) void api.contributions.clearPersonalData(slug, token);
-  }, [shown, slug, token]);
 
   async function copyLink() {
     try {
@@ -89,7 +97,7 @@ export function ReceiptView({
     return (
       <div className="max-w-xl">
         <h1 className="text-title text-ink">Não conseguimos conferir agora</h1>
-        <p className="mt-3 text-body text-ink-2">Houve uma falha ao buscar o comprovante. Tente de novo em instantes.</p>
+        <p role="alert" className="mt-3 text-body text-ink-2">{view.message}</p>
         <Button className="mt-7 w-full sm:w-auto" onClick={() => { setView({ kind: "checking" }); setAttempt((n) => n + 1); }}>
           Tentar de novo
         </Button>
@@ -102,12 +110,15 @@ export function ReceiptView({
       <div className="max-w-xl">
         <h1 className="text-title text-ink">Este pagamento ainda não foi confirmado</h1>
         <p className="mt-3 text-body text-ink-2">
-          O comprovante só existe depois que o banco confirma o Pix. Se você acabou de pagar, aguarde um instante e abra
-          o link de novo.
+          O comprovante só existe depois que o banco confirma o Pix. Se você acabou de pagar, aguarde um instante e
+          atualize esta página. Se o pagamento estiver em análise pela escola, ele aparece aqui quando for confirmado.
         </p>
-        <ButtonLink href={`/apm/${slug}`} className="mt-7 w-full sm:w-auto">
-          Voltar para a escola
-        </ButtonLink>
+        <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+          <Button onClick={() => { setView({ kind: "checking" }); setAttempt((n) => n + 1); }}>Atualizar</Button>
+          <ButtonLink href={`/escola/${slug}`} variant="secondary">
+            Voltar para a escola
+          </ButtonLink>
+        </div>
       </div>
     );
   }
@@ -136,7 +147,7 @@ export function ReceiptView({
             {copied ? <CheckIcon size={20} className="pop" /> : <CopyIcon size={20} />}
             {copied ? "Link copiado" : "Copiar link"}
           </Button>
-          <ButtonLink href={`/apm/${slug}`} variant="plain">
+          <ButtonLink href={`/escola/${slug}`} variant="plain">
             Fazer outra contribuição
           </ButtonLink>
         </div>

@@ -6,6 +6,7 @@ import { TextField } from "@/components/ui/TextField";
 import type { PublicSchool } from "@/lib/api/types";
 import {
   FIELD_LABELS,
+  FIELD_MAX_LENGTH,
   visibleFields,
   type IdentificationErrors,
   type IdentificationField,
@@ -17,12 +18,21 @@ const AUTOCOMPLETE: Record<IdentificationField, string> = {
   guardianName: "name",
   studentName: "off",
   classroom: "off",
+  contributorEmail: "email",
+  contributorPhone: "tel",
 };
 
 const PLACEHOLDERS: Record<IdentificationField, string> = {
   guardianName: "Como está no seu documento",
   studentName: "Nome do aluno ou da aluna",
   classroom: "Ex.: 4º ano B",
+  contributorEmail: "voce@exemplo.com.br",
+  contributorPhone: "(11) 91234-5678",
+};
+
+const INPUT_TYPE: Partial<Record<IdentificationField, { type: string; inputMode: "email" | "tel" }>> = {
+  contributorEmail: { type: "email", inputMode: "email" },
+  contributorPhone: { type: "tel", inputMode: "tel" },
 };
 
 interface IdentificationStepProps {
@@ -83,9 +93,11 @@ export function IdentificationStep({
             // navegadores) e sem historico de autopreenchimento para aluno e turma.
             spellCheck={false}
             autoCorrect="off"
-            autoCapitalize="words"
+            autoCapitalize={INPUT_TYPE[field] ? "none" : "words"}
+            type={INPUT_TYPE[field]?.type}
+            inputMode={INPUT_TYPE[field]?.inputMode}
             placeholder={PLACEHOLDERS[field]}
-            maxLength={80}
+            maxLength={FIELD_MAX_LENGTH[field]}
             value={values[field] ?? ""}
             onChange={(e) => onChange(field, e.target.value)}
             error={errors[field]}

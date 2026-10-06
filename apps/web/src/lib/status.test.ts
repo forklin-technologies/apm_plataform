@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   KIND_LABELS,
   movementStatusView,
+  parseContributionStatus,
   parsePixStatus,
+  paymentPhase,
   pixStatusView,
   type MovementKind,
   type MovementStatus,
@@ -10,7 +12,7 @@ import {
 
 describe("parsePixStatus", () => {
   it("aceita so os status do contrato", () => {
-    for (const ok of ["PENDING", "PAID", "EXPIRED", "CANCELLED"]) {
+    for (const ok of ["PENDING", "PAID", "REVIEW_REQUIRED", "EXPIRED", "CANCELLED"]) {
       expect(parsePixStatus(ok)).toBe(ok);
     }
   });
@@ -64,5 +66,35 @@ describe("movementStatusView", () => {
         if (v.label === "Status indisponível") expect(v.tone).not.toBe("success");
       }
     }
+  });
+});
+
+describe("REVIEW_REQUIRED e paymentPhase (a contribuicao so e paga quando a API diz PAID)", () => {
+  const charge = (status: "PENDING" | "PAID" | "REVIEW_REQUIRED" | "EXPIRED" | "CANCELLED") => ({ status });
+
+  it("em analise nao e pago nem final", () => {
+    expect(pixStatusView("REVIEW_REQUIRED")).toMatchObject({ label: "Em análise", final: false });
+    expect(pixStatusView("REVIEW_REQUIRED").description).toMatch(/não foi confirmada/);
+  });
+
+  it("parseContributionStatus: so os do contrato; desconhecido vira null", () => {
+    for (const ok of ["PENDING_PAYMENT", "PAID", "REVIEW_REQUIRED", "EXPIRED", "CANCELLED"]) expect(parseContributionStatus(ok)).toBe(ok);
+    for (const bad of ["paid", "CONFIRMED", "", null, 1]) expect(parseContributionStatus(bad)).toBeNull();
+  });
+
+  it("fases", () => {
+    expect(paymentPhase({ status: "PAID", charge: charge("PAID") })).toBe("paid");
+    expect(paymentPhase({ status: "PENDING_PAYMENT", charge: charge("PENDING") })).toBe("waiting");
+    expect(paymentPhase({ status: "PENDING_PAYMENT", charge: charge("EXPIRED") })).toBe("expired");
+    expect(paymentPhase({ status: "PENDING_PAYMENT", charge: charge("CANCELLED") })).toBe("expired");
+    expect(paymentPhase({ status: "REVIEW_REQUIRED", charge: charge("REVIEW_REQUIRED") })).toBe("review");
+    expect(paymentPhase({ status: "PENDING_PAYMENT", charge: charge("REVIEW_REQUIRED") })).toBe("review");
+    expect(paymentPhase({ status: "CANCELLED", charge: charge("CANCELLED") })).toBe("closed");
+    expect(paymentPhase({ status: "EXPIRED", charge: null })).toBe("closed");
+    expect(paymentPhase({ status: "PENDING_PAYMENT", charge: null })).toBe("closed");
+  });
+
+  it("cobranca PAID sozinha (contribuicao ainda pendente) NAO e paga", () => {
+    expect(paymentPhase({ status: "PENDING_PAYMENT", charge: charge("PAID") })).toBe("waiting");
   });
 });

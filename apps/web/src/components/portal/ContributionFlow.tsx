@@ -2,7 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import type { ContributionAmount, PixCharge, PublicSchool } from "@/lib/api/types";
+import type { CreatedContribution, PublicSchool } from "@/lib/api/types";
+import { describeContributionError } from "@/lib/public-messages";
 import {
   validateAmount,
   validateIdentification,
@@ -11,7 +12,7 @@ import {
   type IdentificationField,
   type IdentificationValues,
 } from "@/lib/validation";
-import { AmountStep, CUSTOM_CHOICE } from "./AmountStep";
+import { AmountStep, CUSTOM_CHOICE, suggestedCents } from "./AmountStep";
 import { StepProgress, SummaryCard, type Step } from "./FlowChrome";
 import { IdentificationStep } from "./IdentificationStep";
 import { PixPayment } from "./PixPayment";
@@ -39,7 +40,11 @@ export function ContributionFlow({ school }: { school: PublicSchool }) {
   const [errors, setErrors] = useState<IdentificationErrors>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [charge, setCharge] = useState<PixCharge | null>(null);
+  // O token (segredo da familia) so vive aqui, em memoria: nunca em storage nem em URL ate o comprovante.
+  const [created, setCreated] = useState<CreatedContribution | null>(null);
+  // A Idempotency-Key e tao secreta quanto o token: uma por TENTATIVA (mesmo valor e mesmos dados),
+  // reaproveitada se o POST for repetido por falha de rede e trocada quando o usuario muda algo.
+  const attempt = useRef<{ key: string; signature: string } | null>(null);
 
   const headingRef = useRef<HTMLHeadingElement>(null);
   const mounted = useRef(false);
@@ -53,14 +58,10 @@ export function ContributionFlow({ school }: { school: PublicSchool }) {
     headingRef.current?.focus();
   }, [step]);
 
-  const quota = school.quotas.find((q) => q.id === choice);
-  const amountCents = choice === CUSTOM_CHOICE ? customCents : (quota?.amountCents ?? null);
+  const suggested = suggestedCents(choice);
+  const amountCents = choice === CUSTOM_CHOICE ? customCents : suggested;
   const description =
-    choice === CUSTOM_CHOICE
-      ? customCents > 0
-        ? "Valor livre"
-        : null
-      : (quota?.name ?? null);
+    choice === CUSTOM_CHOICE ? (customCents > 0 ? "Valor livre" : null) : suggested !== null ? "Valor sugerido pela APM" : null;
 
   function onChoice(next: string) {
     setChoice(next);
@@ -73,7 +74,7 @@ export function ContributionFlow({ school }: { school: PublicSchool }) {
       return;
     }
     if (choice === CUSTOM_CHOICE) {
-      const check = validateAmount(customCents, school.customAmount);
+      const check = validateAmount(customCents, { minCents: school.minAmountCents, maxCents: school.maxAmountCents });
       if (!check.ok) {
         setAmountError(check.message);
         return;
@@ -95,27 +96,34 @@ export function ContributionFlow({ school }: { school: PublicSchool }) {
     setStep("review");
   }
 
-  function buildAmount(): ContributionAmount | null {
-    if (choice === null) return null;
-    return choice === CUSTOM_CHOICE ? { kind: "CUSTOM", cents: customCents } : { kind: "QUOTA", quotaId: choice };
-  }
-
   async function createCharge() {
-    const amount = buildAmount();
-    if (!amount) return;
+    if (amountCents === null || amountCents <= 0) return;
+    const input = { amountCents, identification: values };
+    const signature = JSON.stringify(input);
+    if (attempt.current?.signature !== signature) attempt.current = { key: crypto.randomUUID(), signature };
     setSubmitting(true);
     setSubmitError(null);
-    const result = await api.contributions.create({ slug: school.slug, amount, identification: values });
+    const result = await api.public.createContribution(school.slug, input, attempt.current.key);
     setSubmitting(false);
     if (!result.ok) {
-      setSubmitError(
-        result.error.status === 422
-          ? "Algum dado não foi aceito pela escola. Volte e confira o valor e os campos."
-          : "Não foi possível gerar o Pix agora. Tente de novo em instantes.",
-      );
+      const problems = describeContributionError(result.error);
+      if (result.error.code === "idempotency_key_reused") attempt.current = null;
+      const fieldProblems = Object.keys(problems.fields).filter((f) => fields.includes(f as IdentificationField));
+      if (fieldProblems.length > 0) {
+        setErrors(problems.fields);
+        setStep("identification");
+        return;
+      }
+      if (problems.amount) {
+        setAmountError(problems.amount);
+        setStep("amount");
+        return;
+      }
+      setSubmitError(problems.general ?? "Não foi possível gerar o Pix agora. Tente de novo em instantes.");
       return;
     }
-    setCharge(result.data.charge);
+    attempt.current = null; // contribuicao criada: a chave nao serve mais para nada
+    setCreated(result.data);
     setStep("pix");
   }
 
@@ -127,7 +135,8 @@ export function ContributionFlow({ school }: { school: PublicSchool }) {
     setErrors({});
     setAmountError(null);
     setSubmitError(null);
-    setCharge(null);
+    setCreated(null);
+    attempt.current = null;
   }
 
   return (
@@ -187,12 +196,12 @@ export function ContributionFlow({ school }: { school: PublicSchool }) {
               />
             )}
 
-            {step === "pix" && charge && (
+            {step === "pix" && created && (
               <PixPayment
-                key={charge.token}
+                key={created.token}
                 slug={school.slug}
-                charge={charge}
-                onNewCharge={createCharge}
+                token={created.token}
+                initial={created}
                 onRestart={restart}
               />
             )}

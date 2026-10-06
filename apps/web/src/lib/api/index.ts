@@ -1,20 +1,29 @@
 /**
  * Unico ponto de entrada para dados. Componentes importam `api` daqui e nunca de src/mocks.
  *
- * - `health` e `auth` sao REAIS (mesma origem, /api/*): GET /api/health/ready e a autenticacao
- *   (login, logout, me, context, password, aceite de convite; docs/auth.md).
- * - `schools`, `contributions` e `dashboard` sao SIMULADOS por src/mocks atras das interfaces
- *   de types.ts, porque a API ainda nao tem esses endpoints. Quando tiver, so este arquivo muda.
+ * - `health`, `auth` e `public` sao REAIS (mesma origem, /api/*): GET /api/health/ready, a autenticacao
+ *   (docs/auth.md) e o portal publico de contribuicao (docs/public-flow.md).
+ * - `dashboard` (indicadores e movimentacoes do painel) e SIMULADO por src/mocks atras da interface de
+ *   types.ts ate o painel ser ligado ao extrato real. Quando for, so este arquivo muda.
  */
 import { mockDataSource } from "@/mocks";
 import { acceptInvitation, changePassword, getMe, login, logout, switchContext } from "./auth";
 import { getReadiness } from "./health";
+import { createContribution, getContribution, getPublicSchool, getReceipt, renewCharge, sandboxPay } from "./public";
 import type { DataSource } from "./types";
 
 export const IS_PROTOTYPE_DATA = true;
 
 export const api: DataSource & {
   health: { ready: typeof getReadiness };
+  public: {
+    school: typeof getPublicSchool;
+    createContribution: typeof createContribution;
+    contribution: typeof getContribution;
+    renewCharge: typeof renewCharge;
+    receipt: typeof getReceipt;
+    sandboxPay: typeof sandboxPay;
+  };
   auth: {
     login: typeof login;
     logout: typeof logout;
@@ -25,10 +34,17 @@ export const api: DataSource & {
   };
 } = {
   health: { ready: getReadiness },
+  public: {
+    school: getPublicSchool,
+    createContribution,
+    contribution: getContribution,
+    renewCharge,
+    receipt: getReceipt,
+    sandboxPay,
+  },
   auth: { login, logout, me: getMe, switchContext, changePassword, acceptInvitation },
   ...mockDataSource,
 };
 
-export { DEMO_RECEIPT_TOKEN } from "./token";
 export type { DataSource } from "./types";
 export * from "./types";

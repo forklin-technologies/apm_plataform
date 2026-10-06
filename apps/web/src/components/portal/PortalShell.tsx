@@ -1,6 +1,5 @@
 import Link from "next/link";
 import type { PublicSchool } from "@/lib/api/types";
-import { PrototypeBadge } from "@/components/ui/PrototypeBadge";
 import { SchoolMonogram } from "./SchoolMonogram";
 import { SchoolThemeScope } from "./SchoolThemeScope";
 
@@ -24,7 +23,6 @@ export function PortalShell({ school, children }: { school: PublicSchool; childr
         </div>
       </header>
       <main id="conteudo" tabIndex={-1} className="outline-none mx-auto w-full max-w-5xl px-5 pb-16 pt-6 sm:px-8 sm:pt-10">
-        <PrototypeBadge className="mb-6" />
         {children}
       </main>
     </SchoolThemeScope>

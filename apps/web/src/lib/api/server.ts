@@ -48,3 +48,9 @@ export async function getServerSession(fetchImpl: typeof fetch = fetch): Promise
     return { state: "unavailable" };
   }
 }
+
+/**
+ * fetch do servidor do Next para a API: o mesmo cliente tipado (src/lib/api/public.ts) funciona nas
+ * paginas de servidor se o caminho `/api/...` ganhar a origem da API. Sem cookies: so rotas publicas.
+ */
+export const serverFetch: typeof fetch = (input, init) => fetch(`${serverApiOrigin()}${String(input)}`, init);

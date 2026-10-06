@@ -45,6 +45,8 @@ const config: IdentificationConfig = {
   guardianName: "REQUIRED",
   studentName: "REQUIRED",
   classroom: "OPTIONAL",
+  contributorEmail: "HIDDEN",
+  contributorPhone: "HIDDEN",
 };
 
 describe("validateIdentification", () => {
@@ -84,7 +86,40 @@ describe("validateIdentification", () => {
   it("valida tamanho de campos opcionais preenchidos", () => {
     const tooShort = validateIdentification({ guardianName: "Ana", studentName: "Davi", classroom: "x" }, config);
     expect(tooShort.errors.classroom).toMatch(/pelo menos 2/);
-    const tooLong = validateIdentification({ guardianName: "a".repeat(81), studentName: "Davi" }, config);
-    expect(tooLong.errors.guardianName).toMatch(/no máximo 80/);
+    const tooLong = validateIdentification({ guardianName: "a".repeat(121), studentName: "Davi" }, config);
+    expect(tooLong.errors.guardianName).toMatch(/no máximo 120/);
+  });
+});
+
+describe("e-mail e telefone (formatos da API)", () => {
+  const open: IdentificationConfig = { ...config, studentName: "HIDDEN", contributorEmail: "OPTIONAL", contributorPhone: "REQUIRED" };
+
+  it("aceita e-mail e telefone no formato da API e leva os dois adiante", () => {
+    const result = validateIdentification(
+      { guardianName: "Ana Lima", contributorEmail: " ana@exemplo.com.br ", contributorPhone: "(11) 91234-5678" },
+      open,
+    );
+    expect(result.ok).toBe(true);
+    expect(result.cleaned).toEqual({ guardianName: "Ana Lima", contributorEmail: "ana@exemplo.com.br", contributorPhone: "(11) 91234-5678" });
+  });
+
+  it("recusa e-mail sem @ e telefone com letras ou curto; telefone obrigatorio vazio", () => {
+    const bad = validateIdentification(
+      { guardianName: "Ana Lima", contributorEmail: "ana.exemplo.com", contributorPhone: "abc" },
+      open,
+    );
+    expect(bad.errors.contributorEmail).toMatch(/@/);
+    expect(bad.errors.contributorPhone).toMatch(/Confira o telefone/);
+    expect(validateIdentification({ guardianName: "Ana Lima", contributorPhone: "123" }, open).errors.contributorPhone).toBeDefined();
+    expect(validateIdentification({ guardianName: "Ana Lima" }, open).errors.contributorPhone).toBe("Informe o telefone.");
+  });
+
+  it("e-mail e telefone ocultos nunca seguem adiante", () => {
+    const result = validateIdentification(
+      { guardianName: "Ana Lima", contributorEmail: "ana@exemplo.com.br", contributorPhone: "11912345678" },
+      config,
+    );
+    expect(result.cleaned).toEqual({ guardianName: "Ana Lima" });
+    expect(visibleFields(config)).toEqual(["guardianName", "studentName", "classroom"]);
   });
 });

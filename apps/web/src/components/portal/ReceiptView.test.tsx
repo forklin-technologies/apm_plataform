@@ -3,12 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { Component, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiResult, Receipt } from "@/lib/api/types";
+import { RECEIPT, TOKEN } from "@/test-utils/public-fixtures";
 
 const getReceipt = vi.fn<(slug: string, token: string) => Promise<ApiResult<Receipt>>>();
-const clearPersonalData = vi.fn<(slug: string, token: string) => Promise<void>>();
 
 vi.mock("@/lib/api", () => ({
-  api: { contributions: { getReceipt: (...a: [string, string]) => getReceipt(...a), clearPersonalData: (...a: [string, string]) => clearPersonalData(...a) } },
+  api: { public: { receipt: (...a: [string, string]) => getReceipt(...a) } },
 }));
 vi.mock("next/navigation", () => ({
   notFound: () => {
@@ -17,19 +17,6 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { ReceiptView } from "./ReceiptView";
-
-const TOKEN = "AbCdEfGhIjKlMnOpQrStUv";
-const receipt: Receipt = {
-  token: TOKEN,
-  number: "2026-000001",
-  schoolName: "Escola Exemplo",
-  apmName: "APM da Escola Exemplo",
-  description: "Cota anual",
-  amountCents: 20000,
-  status: "PAID",
-  paidAt: "2026-09-30T16:42:00-03:00",
-  identification: { guardianName: "Ana Lima", studentName: "Davi Lima" },
-};
 
 class Boundary extends Component<{ children: ReactNode }, { failed: string | null }> {
   override state = { failed: null as string | null };
@@ -41,62 +28,85 @@ class Boundary extends Component<{ children: ReactNode }, { failed: string | nul
   }
 }
 
-const renderView = (initial: Receipt | null = null) =>
+const renderView = (initial: React.ComponentProps<typeof ReceiptView>["initial"] = null) =>
   render(
     <Boundary>
-      <ReceiptView slug="escola-exemplo" token={TOKEN} initial={initial} />
+      <ReceiptView slug="demo-aurora" token={TOKEN} initial={initial} />
     </Boundary>,
   );
 
+const problem = (status: number, code: string, extra = {}): ApiResult<Receipt> => ({ ok: false, error: { kind: "problem", status, code, ...extra } });
+
 beforeEach(() => {
   getReceipt.mockReset();
-  clearPersonalData.mockReset().mockResolvedValue(undefined);
 });
 
-describe("ReceiptView (N1, N8)", () => {
-  it("sem resposta da camada de dados fica NEUTRO: sem 'Pago', sem nome, sem valor, sem apagar nada", () => {
+describe("ReceiptView (a API decide; o token so vive na URL e na memoria)", () => {
+  it("sem resposta da API fica NEUTRO: sem 'Pago', sem valor", () => {
     getReceipt.mockReturnValue(new Promise(() => {}));
     renderView();
     expect(screen.getByRole("status")).toHaveTextContent("Conferindo seu comprovante");
-    expect(document.body.textContent).not.toMatch(/\bPago\b|Ana Lima|R\$/);
-    expect(clearPersonalData).not.toHaveBeenCalled();
+    expect(document.body.textContent).not.toMatch(/\bPago\b|R\$/);
   });
 
-  it("so mostra 'Pago' e os dados depois que a camada de dados responde, e DEPOIS apaga os dados pessoais", async () => {
-    getReceipt.mockResolvedValue({ ok: true, data: receipt });
+  it("so mostra 'Pago' e os dados depois que a API responde 200", async () => {
+    getReceipt.mockResolvedValue({ ok: true, data: RECEIPT });
     renderView();
     expect(await screen.findByRole("heading", { name: "Contribuição confirmada" })).toBeInTheDocument();
-    expect(screen.getByText("Ana Lima")).toBeInTheDocument();
+    expect(screen.getByText("APM-000026")).toBeInTheDocument();
+    expect(screen.getByText("Pix")).toBeInTheDocument();
     expect(screen.getByText("Pago")).toBeInTheDocument();
-    await waitFor(() => expect(clearPersonalData).toHaveBeenCalledWith("escola-exemplo", TOKEN));
+    expect(getReceipt).toHaveBeenCalledWith("demo-aurora", TOKEN);
   });
 
-  it("token desconhecido para a camada de dados: a mesma 404 estilizada (notFound)", async () => {
-    getReceipt.mockResolvedValue({ ok: false, error: { kind: "not-found", status: 404 } });
+  it("404 da API (token ruim, de outra escola ou inexistente): a mesma 404 estilizada", async () => {
+    getReceipt.mockResolvedValue(problem(404, "not_found"));
     renderView();
     expect(await screen.findByText("404:NEXT_NOT_FOUND")).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/\bPago\b/);
-    expect(clearPersonalData).not.toHaveBeenCalled();
   });
 
-  it("pedido ainda nao pago (409): nao afirma pagamento", async () => {
-    getReceipt.mockResolvedValue({ ok: false, error: { kind: "http", status: 409 } });
+  it("409 payment_not_confirmed: nao afirma pagamento e permite atualizar", async () => {
+    getReceipt.mockResolvedValueOnce(problem(409, "payment_not_confirmed")).mockResolvedValueOnce({ ok: true, data: RECEIPT });
     renderView();
     expect(await screen.findByRole("heading", { name: "Este pagamento ainda não foi confirmado" })).toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/\bPago\b/);
+    await userEvent.setup().click(screen.getByRole("button", { name: "Atualizar" }));
+    expect(await screen.findByRole("heading", { name: "Contribuição confirmada" })).toBeInTheDocument();
+  });
+
+  it("429: texto amigavel com o tempo de espera", async () => {
+    getReceipt.mockResolvedValue(problem(429, "rate_limited", { retryAfterSeconds: 45 }));
+    renderView();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Aguarde 45 segundos");
   });
 
   it("falha de rede: avisa e permite tentar de novo", async () => {
-    getReceipt.mockResolvedValueOnce({ ok: false, error: { kind: "network" } }).mockResolvedValueOnce({ ok: true, data: receipt });
+    getReceipt.mockResolvedValueOnce({ ok: false, error: { kind: "network" } }).mockResolvedValueOnce({ ok: true, data: RECEIPT });
     renderView();
     await userEvent.setup().click(await screen.findByRole("button", { name: "Tentar de novo" }));
     expect(await screen.findByRole("heading", { name: "Contribuição confirmada" })).toBeInTheDocument();
     expect(getReceipt).toHaveBeenCalledTimes(2);
   });
 
-  it("o comprovante de exemplo (initial vindo do servidor) aparece direto", () => {
-    getReceipt.mockReturnValue(new Promise(() => {}));
-    renderView(receipt);
+  it("resposta 200 que o servidor ja trouxe aparece direto, sem consultar de novo", async () => {
+    renderView({ receipt: RECEIPT });
     expect(screen.getByRole("heading", { name: "Contribuição confirmada" })).toBeInTheDocument();
+    await waitFor(() => expect(getReceipt).not.toHaveBeenCalled());
+  });
+
+  it("409 que o servidor ja trouxe aparece direto como 'ainda nao confirmado'", () => {
+    renderView({ unconfirmed: true });
+    expect(screen.getByRole("heading", { name: "Este pagamento ainda não foi confirmado" })).toBeInTheDocument();
+    expect(getReceipt).not.toHaveBeenCalled();
+  });
+
+  it("nunca grava o token em localStorage nem sessionStorage", async () => {
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    getReceipt.mockResolvedValue({ ok: true, data: RECEIPT });
+    renderView();
+    await screen.findByRole("heading", { name: "Contribuição confirmada" });
+    expect(setItem).not.toHaveBeenCalled();
+    vi.restoreAllMocks();
   });
 });

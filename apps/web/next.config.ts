@@ -35,6 +35,13 @@ const nextConfig: NextConfig = {
   // O `next dev` gera AGENTS.md/CLAUDE.md sozinho; fora do escopo desta tarefa.
   agentRules: false,
   reactStrictMode: true,
+  // /apm/{slug} foi a rota do prototipo: a definitiva e /escola/{slug} (e o comprovante dentro dela).
+  async redirects() {
+    return [
+      { source: "/apm/:slug", destination: "/escola/:slug", permanent: false },
+      { source: "/apm/:slug/pedido/:token", destination: "/escola/:slug/pedido/:token", permanent: false },
+    ];
+  },
   async rewrites() {
     return [{ source: "/api/:path*", destination: `${apiProxyUrl}/api/:path*` }];
   },

@@ -4,41 +4,49 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { CheckIcon, ClockIcon, CopyIcon, InfoIcon, RefreshIcon } from "@/components/ui/icons";
 import { api } from "@/lib/api";
-import type { ApiResult, PixCharge } from "@/lib/api/types";
+import { sandboxTxid } from "@/lib/api/public";
+import type { ApiResult, ContributionState } from "@/lib/api/types";
 import { formatCountdown } from "@/lib/format";
-import { useChargeStatus } from "@/lib/hooks/useChargeStatus";
+import { useContributionState } from "@/lib/hooks/useContributionState";
 import { useCountdown } from "@/lib/hooks/useCountdown";
 import { formatBRL } from "@/lib/money";
-import { pixStatusView } from "@/lib/status";
+import { describeRenewError } from "@/lib/public-messages";
 import { PaidStamp } from "./ReceiptCard";
-import { QrPlaceholder } from "./QrPlaceholder";
+import { QrCode } from "./QrCode";
 
 type CopyState = "idle" | "copied" | "manual";
 
 interface PixPaymentProps {
   slug: string;
-  charge: PixCharge;
-  /** Pede um novo Pix (a camada de dados cria outro). */
-  onNewCharge: () => void;
+  /** Token opaco da contribuicao: segredo da familia, so em memoria e na URL do comprovante. */
+  token: string;
+  initial: ContributionState;
   onRestart: () => void;
-  /** Injetavel para teste. Padrao: consulta a camada de dados. */
-  fetchCharge?: () => Promise<ApiResult<PixCharge>>;
+  /** Injetaveis para teste. Padrao: a API real. */
+  fetchState?: () => Promise<ApiResult<ContributionState>>;
   pollMs?: number;
 }
 
 /**
- * Passo Pix. REGRA: este componente nunca marca nada como pago. Ele consulta a camada de dados
- * (polling) e renderiza o status que ela devolve. "Pago" so aparece se status === "PAID".
+ * Passo Pix. REGRA: este componente nunca marca nada como pago. Ele consulta a API (polling de
+ * GET .../charge) e renderiza o que ela devolve. "Pago" so aparece se a CONTRIBUICAO vier PAID.
  */
-export function PixPayment({ slug, charge: initial, onNewCharge, onRestart, fetchCharge, pollMs }: PixPaymentProps) {
-  const { charge, status, connectionIssue, notFound } = useChargeStatus({
+export function PixPayment({ slug, token, initial, onRestart, fetchState, pollMs }: PixPaymentProps) {
+  const { state, phase, connectionIssue, notFound, replace, refresh } = useContributionState({
     initial,
-    fetchCharge: fetchCharge ?? (() => api.contributions.getCharge(slug, initial.token)),
+    fetchState: fetchState ?? (() => api.public.contribution(slug, token)),
     intervalMs: pollMs,
   });
-  const view = pixStatusView(status);
-  const waiting = status === "PENDING" || status === null;
-  const remaining = useCountdown(charge.expiresAt, waiting);
+  const charge = state.charge;
+  const payload = charge?.emvPayload ?? "";
+  const waiting = phase === "waiting";
+  const remaining = useCountdown(charge?.expiresAt ?? new Date(0).toISOString(), waiting);
+  const txid = sandboxTxid(charge?.emvPayload ?? null);
+
+  const [renewing, setRenewing] = useState(false);
+  const [renewError, setRenewError] = useState<string | null>(null);
+  const [simulating, setSimulating] = useState(false);
+  const [simulateMessage, setSimulateMessage] = useState<string | null>(null);
 
   const [copy, setCopy] = useState<CopyState>("idle");
   const codeRef = useRef<HTMLTextAreaElement>(null);
@@ -49,7 +57,7 @@ export function PixPayment({ slug, charge: initial, onNewCharge, onRestart, fetc
 
   // A caixa do codigo cresce com o texto: em telas estreitas o payload ocupa mais linhas e nenhuma
   // pode ficar escondida (a quebra e entre palavras, nunca no meio de VALOR).
-  const hasCode = status === "PENDING" || status === null;
+  const hasCode = waiting;
   useLayoutEffect(() => {
     const el = codeRef.current;
     if (!el || !hasCode) return;
@@ -62,7 +70,7 @@ export function PixPayment({ slug, charge: initial, onNewCharge, onRestart, fetc
     const observer = new ResizeObserver(fit);
     observer.observe(el.parentElement); // a largura do contêiner muda a quebra de linha
     return () => observer.disconnect();
-  }, [charge.payload, hasCode]);
+  }, [payload, hasCode]);
 
   // Ao abrir o passo Pix, o foco vai para o titulo.
   useEffect(() => {
@@ -70,21 +78,42 @@ export function PixPayment({ slug, charge: initial, onNewCharge, onRestart, fetc
   }, []);
 
   // Quando o status final chega, o foco vai para o titulo (leitores de tela anunciam).
-  const finalReached = view.final;
   useEffect(() => {
-    if (finalReached) headingRef.current?.focus();
-  }, [finalReached]);
+    if (phase !== "waiting") headingRef.current?.focus();
+  }, [phase]);
 
   async function copyCode() {
     clearTimeout(copyTimer.current);
     try {
-      await navigator.clipboard.writeText(charge.payload);
+      await navigator.clipboard.writeText(payload);
       setCopy("copied");
     } catch {
       codeRef.current?.select();
       setCopy("manual");
     }
     copyTimer.current = setTimeout(() => setCopy("idle"), 4000);
+  }
+
+  async function renew() {
+    if (renewing) return;
+    setRenewing(true);
+    setRenewError(null);
+    const result = await api.public.renewCharge(slug, token);
+    setRenewing(false);
+    if (result.ok) replace(result.data);
+    else setRenewError(describeRenewError(result.error));
+  }
+
+  // Somente desenvolvimento: faz o banco de mentira pagar. NAO confirma nada aqui: a tela so muda
+  // quando a API, na proxima consulta, devolver a contribuicao PAID.
+  async function simulatePayment() {
+    if (!txid || simulating) return;
+    setSimulating(true);
+    setSimulateMessage(null);
+    const result = await api.public.sandboxPay(txid);
+    setSimulating(false);
+    if (result.ok) refresh();
+    else setSimulateMessage("Não foi possível simular o pagamento (isso só existe em desenvolvimento).");
   }
 
   if (notFound) {
@@ -101,7 +130,7 @@ export function PixPayment({ slug, charge: initial, onNewCharge, onRestart, fetc
     );
   }
 
-  if (status === "PAID") {
+  if (phase === "paid") {
     return (
       <div className="step-in rounded-[var(--r-lg)] bg-surface p-6 text-center shadow-[0_0_0_1px_var(--line)] sm:p-10">
         <div className="relative mx-auto grid size-32 place-items-center">
@@ -112,37 +141,86 @@ export function PixPayment({ slug, charge: initial, onNewCharge, onRestart, fetc
         </h2>
         <p className="mt-2 text-body text-ink-2">
           Recebemos a contribuição de{" "}
-          <strong className="font-semibold tabular-nums text-ink">{formatBRL(charge.amountCents)}</strong>. Obrigado por
+          <strong className="font-semibold tabular-nums text-ink">{formatBRL(state.amountCents)}</strong>. Obrigado por
           apoiar a escola.
         </p>
         <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:justify-center">
-          <ButtonLink href={`/apm/${slug}/pedido/${charge.token}`}>Ver comprovante</ButtonLink>
+          <ButtonLink href={`/escola/${slug}/pedido/${token}`}>Ver comprovante</ButtonLink>
           <Button variant="secondary" onClick={onRestart}>
             Fazer outra contribuição
           </Button>
         </div>
         <p role="status" className="sr-only-live">
-          {view.description}
+          Pagamento confirmado.
         </p>
       </div>
     );
   }
 
-  if (status === "EXPIRED" || status === "CANCELLED") {
+  if (phase === "review") {
     return (
       <div className="step-in rounded-[var(--r-lg)] bg-surface p-6 shadow-[0_0_0_1px_var(--line)] sm:p-8">
         <h2 ref={headingRef} tabIndex={-1} className="text-heading text-ink outline-none">
-          {status === "EXPIRED" ? "Este Pix expirou" : "Este Pix foi cancelado"}
+          Pagamento em análise pela escola
+        </h2>
+        <p role="status" className="mt-2 max-w-[52ch] text-body text-ink-2">
+          Recebemos um pagamento, mas a escola precisa conferi-lo antes de confirmar a contribuição. Por enquanto ela{" "}
+          <strong className="font-semibold text-ink">não está confirmada</strong> e não há comprovante. Se a escola
+          confirmar, esta página atualiza sozinha.
+        </p>
+        {connectionIssue && (
+          <p className="mt-3 flex items-start gap-1.5 text-sub text-warn">
+            <InfoIcon size={16} className="mt-0.5 shrink-0" />
+            Sem conexão para atualizar o status. Tentando de novo.
+          </p>
+        )}
+        <div className="mt-6">
+          <Button variant="secondary" onClick={onRestart}>
+            Começar de novo
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  if (phase === "closed") {
+    return (
+      <div className="step-in rounded-[var(--r-lg)] bg-surface p-6 shadow-[0_0_0_1px_var(--line)] sm:p-8">
+        <h2 ref={headingRef} tabIndex={-1} className="text-heading text-ink outline-none">
+          Esta contribuição foi encerrada
         </h2>
         <p role="status" className="mt-2 text-body text-ink-2">
-          {view.description} Gere um novo Pix para continuar.
+          Ela expirou ou foi cancelada e nenhum valor foi cobrado. Comece uma nova contribuição para continuar.
         </p>
+        <Button className="mt-6" onClick={onRestart}>
+          Começar de novo
+        </Button>
+      </div>
+    );
+  }
+
+  if (phase === "expired") {
+    return (
+      <div className="step-in rounded-[var(--r-lg)] bg-surface p-6 shadow-[0_0_0_1px_var(--line)] sm:p-8">
+        <h2 ref={headingRef} tabIndex={-1} className="text-heading text-ink outline-none">
+          Este QR expirou
+        </h2>
+        <p role="status" className="mt-2 text-body text-ink-2">
+          O Pix expirou e nenhum valor foi cobrado. Gere um novo QR para continuar.
+        </p>
+        <div aria-live="polite">
+          {renewError && (
+            <p role="alert" className="mt-4 rounded-[var(--r-md)] bg-bad-soft px-4 py-3 text-sub font-medium text-bad">
+              {renewError}
+            </p>
+          )}
+        </div>
         <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-          <Button onClick={onNewCharge}>
+          <Button onClick={renew} disabled={renewing} aria-busy={renewing}>
             <RefreshIcon size={20} />
-            Gerar novo Pix
+            {renewing ? "Gerando…" : "Gerar novo QR"}
           </Button>
-          <Button variant="secondary" onClick={onRestart}>
+          <Button variant="secondary" onClick={onRestart} disabled={renewing}>
             Começar de novo
           </Button>
         </div>
@@ -158,7 +236,7 @@ export function PixPayment({ slug, charge: initial, onNewCharge, onRestart, fetc
           <h2 ref={headingRef} tabIndex={-1} className="text-heading text-ink outline-none">
             Pague com Pix
           </h2>
-          <p className="text-heading tabular-nums text-ink">{formatBRL(charge.amountCents)}</p>
+          <p className="text-heading tabular-nums text-ink">{formatBRL(state.amountCents)}</p>
         </div>
 
         <p className="mt-1 text-sub text-ink-2">
@@ -166,10 +244,12 @@ export function PixPayment({ slug, charge: initial, onNewCharge, onRestart, fetc
         </p>
 
         <div className="mt-6">
-          <QrPlaceholder payload={charge.payload} />
-          <p className="mx-auto mt-3 max-w-[34ch] text-center text-foot text-ink-2">
-            Pix de exemplo para demonstração. Nenhum pagamento real é feito e nenhum app de banco lê este código.
-          </p>
+          <QrCode payload={payload} />
+          {txid && (
+            <p className="mx-auto mt-3 max-w-[34ch] text-center text-foot text-ink-2">
+              Pix de teste (sandbox). Nenhum pagamento real é feito e nenhum app de banco lê este código.
+            </p>
+          )}
         </div>
 
         <div className="mt-6">
@@ -181,7 +261,7 @@ export function PixPayment({ slug, charge: initial, onNewCharge, onRestart, fetc
             ref={codeRef}
             readOnly
             rows={3}
-            value={charge.payload}
+            value={payload}
             onFocus={(e) => e.currentTarget.select()}
             className="block w-full resize-none rounded-[14px] border border-field-border bg-field px-4 py-3 font-mono text-foot leading-relaxed text-ink [overflow-wrap:anywhere]"
           />
@@ -199,6 +279,17 @@ export function PixPayment({ slug, charge: initial, onNewCharge, onRestart, fetc
             {copy === "manual" && "O navegador não permitiu copiar. O código está selecionado: use Ctrl+C ou Cmd+C."}
           </p>
         </div>
+
+        {txid && (
+          <div className="mt-4 border-t border-dashed border-line pt-4">
+            <Button variant="secondary" size="md" onClick={simulatePayment} disabled={simulating} aria-busy={simulating}>
+              {simulating ? "Simulando…" : "Simular pagamento (somente desenvolvimento)"}
+            </Button>
+            <div aria-live="polite">
+              {simulateMessage && <p className="mt-2 text-sub font-medium text-bad">{simulateMessage}</p>}
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="mt-4 rounded-[var(--r-lg)] bg-surface p-5 shadow-[0_0_0_1px_var(--line)]">
@@ -218,9 +309,9 @@ export function PixPayment({ slug, charge: initial, onNewCharge, onRestart, fetc
         <div className="mt-4 flex items-start gap-3 border-t border-line pt-4">
           <span aria-hidden="true" className="pulse-dot mt-2 size-2.5 shrink-0 rounded-full bg-info" />
           <div role="status" aria-live="polite" className="text-sub text-ink">
-            <p className="font-semibold">{view.label}</p>
+            <p className="font-semibold">Aguardando pagamento</p>
             <p className="text-ink-2">
-              {timeUp ? "Conferindo com o banco se o pagamento chegou…" : view.description}
+              {timeUp ? "Conferindo com o banco se o pagamento chegou…" : "Aguardando a confirmação do pagamento."}
             </p>
             {connectionIssue && (
               <p className="mt-1 flex items-start gap-1.5 text-warn">

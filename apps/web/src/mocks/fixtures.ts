@@ -2,76 +2,7 @@
  * DADOS DE EXEMPLO. Tudo aqui e ficticio: escolas, nomes, valores. Quando o backend
  * publicar os endpoints, este diretorio inteiro deixa de ser usado.
  */
-import type { DashboardData, Organization, PublicSchool } from "@/lib/api/types";
-
-export const SCHOOLS: PublicSchool[] = [
-  {
-    slug: "escola-exemplo",
-    name: "Escola Exemplo",
-    apmName: "APM da Escola Exemplo",
-    accentColor: "#E6457A",
-    quotas: [
-      {
-        id: "cota-mensal",
-        name: "Cota mensal",
-        description: "Para contribuir um mês de cada vez",
-        amountCents: 2000,
-      },
-      {
-        id: "cota-semestral",
-        name: "Cota semestral",
-        description: "Cobre o semestre inteiro de uma vez",
-        amountCents: 11000,
-      },
-      {
-        id: "cota-anual",
-        name: "Cota anual",
-        description: "Um único pagamento para o ano letivo",
-        amountCents: 20000,
-      },
-    ],
-    customAmount: { minCents: 500, maxCents: 200000 },
-    identification: { guardianName: "REQUIRED", studentName: "REQUIRED", classroom: "OPTIONAL" },
-  },
-  {
-    slug: "escola-horizonte",
-    name: "Colégio Horizonte",
-    apmName: "APM do Colégio Horizonte",
-    accentColor: "#3BA7E0",
-    quotas: [
-      {
-        id: "contribuicao-basica",
-        name: "Contribuição básica",
-        description: "Valor sugerido pela diretoria da APM",
-        amountCents: 3500,
-      },
-      {
-        id: "contribuicao-solidaria",
-        name: "Contribuição solidária",
-        description: "Ajuda a manter as ações para todas as famílias",
-        amountCents: 7000,
-      },
-    ],
-    customAmount: { minCents: 1000, maxCents: 100000 },
-    identification: { guardianName: "REQUIRED", studentName: "OPTIONAL", classroom: "HIDDEN" },
-  },
-  {
-    slug: "emei-vale-verde",
-    name: "EMEI Vale Verde",
-    apmName: "APM da EMEI Vale Verde",
-    accentColor: "#2E9E6B",
-    quotas: [
-      {
-        id: "ajuda-mensal",
-        name: "Ajuda mensal",
-        description: "Para materiais e passeios das turmas",
-        amountCents: 1500,
-      },
-    ],
-    customAmount: { minCents: 500, maxCents: 50000 },
-    identification: { guardianName: "REQUIRED", studentName: "REQUIRED", classroom: "REQUIRED" },
-  },
-];
+import type { DashboardData, Organization } from "@/lib/api/types";
 
 export const ORGANIZATIONS: Organization[] = [
   {

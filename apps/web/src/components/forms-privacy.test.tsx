@@ -2,7 +2,7 @@ import { fireEvent, render } from "@testing-library/react";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { SCHOOLS } from "@/mocks/fixtures";
+import { SCHOOL } from "@/test-utils/public-fixtures";
 import { AcceptInvitationForm } from "./invitation/AcceptInvitationForm";
 import { LoginForm } from "./login/LoginForm";
 import { AmountStep } from "./portal/AmountStep";
@@ -14,7 +14,7 @@ import { IdentificationStep } from "./portal/IdentificationStep";
  */
 vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn() }) }));
 
-const school = SCHOOLS[0]!;
+const school = { ...SCHOOL, identification: { ...SCHOOL.identification, guardianName: "REQUIRED" as const, studentName: "REQUIRED" as const, classroom: "OPTIONAL" as const } };
 const noop = () => {};
 
 describe("formularios nunca vazam dados na URL", () => {
@@ -36,12 +36,13 @@ describe("formularios nunca vazam dados na URL", () => {
     expect(form.method).toBe("post");
     expect(fireEvent.submit(form)).toBe(false);
     const inputs = [...container.querySelectorAll<HTMLInputElement>("input")];
-    expect(inputs).toHaveLength(3);
-    for (const input of inputs) {
+    expect(inputs).toHaveLength(5);
+    for (const input of inputs.filter((i) => i.name !== "contributorEmail" && i.name !== "contributorPhone")) {
       expect(input.getAttribute("spellcheck")).toBe("false");
       expect(input.getAttribute("autocorrect")).toBe("off");
       expect(input.getAttribute("autocapitalize")).toBe("words");
     }
+    expect(container.querySelector("input[name=contributorEmail]")!.getAttribute("autocomplete")).toBe("email");
     // aluno e turma: sem autopreenchimento; responsavel: so o token padrao 'name'
     expect(container.querySelector("input[name=studentName]")!.getAttribute("autocomplete")).toBe("off");
     expect(container.querySelector("input[name=classroom]")!.getAttribute("autocomplete")).toBe("off");

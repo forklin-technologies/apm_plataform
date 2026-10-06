@@ -9,7 +9,7 @@
  */
 import type { Cents } from "../money";
 import type { IdentificationConfig, IdentificationValues } from "../validation";
-import type { MovementKind, MovementStatus, PixChargeStatus } from "../status";
+import type { ContributionStatus, MovementKind, MovementStatus, PixChargeStatus } from "../status";
 
 // ---------------------------------------------------------------- resultado e erros
 
@@ -99,16 +99,9 @@ export interface AcceptInvitationInput {
   password?: string;
 }
 
-// ---------------------------------------------------------------- PROPOSTA: escola publica
+// ---------------------------------------------------------------- REAL: portal publico (docs/public-flow.md)
 
-export interface Quota {
-  id: string;
-  name: string;
-  description: string;
-  amountCents: Cents;
-}
-
-/** Configuracao publica da escola, resolvida pelo slug da URL (ADR-010). */
+/** Configuracao publica da escola, resolvida pelo slug da URL (ADR-010). Sem id interno. */
 export interface PublicSchool {
   slug: string;
   name: string;
@@ -116,44 +109,52 @@ export interface PublicSchool {
   apmName: string;
   /** Cor da escola (hex). O frontend deriva dai o tema com contraste AA. */
   accentColor: string;
-  quotas: Quota[];
-  customAmount: { minCents: Cents; maxCents: Cents };
+  /** Valores sugeridos (centavos), na ordem da API. */
+  suggestedAmountsCents: Cents[];
+  /** false = so os valores sugeridos sao aceitos. */
+  allowCustomAmount: boolean;
+  minAmountCents: Cents;
+  maxAmountCents: Cents;
   identification: IdentificationConfig;
 }
 
-// ---------------------------------------------------------------- PROPOSTA: contribuicao e Pix
-
-export type ContributionAmount =
-  | { kind: "QUOTA"; quotaId: string }
-  | { kind: "CUSTOM"; cents: Cents };
-
-export interface CreateContributionInput {
-  slug: string;
-  amount: ContributionAmount;
-  identification: IdentificationValues;
-}
+export type ChargeStatus = PixChargeStatus;
+export type { ContributionStatus };
 
 export interface PixCharge {
-  token: string;
-  status: PixChargeStatus;
+  status: ChargeStatus;
   amountCents: Cents;
-  /** Texto do "copia e cola". No prototipo e OBVIAMENTE falso. */
-  payload: string;
-  createdAt: string;
+  /** Texto do "copia e cola" e do QR. No sandbox: `PIX-SANDBOX:<txid>:<valor>`. */
+  emvPayload: string | null;
   expiresAt: string;
-  paidAt: string | null;
+}
+
+/** Estado da contribuicao e da cobranca mais recente (GET .../charge, POST .../charges). */
+export interface ContributionState {
+  status: ContributionStatus;
+  amountCents: Cents;
+  charge: PixCharge | null;
+}
+
+/** Resposta do POST de criacao: o token opaco (segredo da familia) so existe aqui e na URL do comprovante. */
+export interface CreatedContribution extends ContributionState {
+  token: string;
+}
+
+export interface CreateContributionInput {
+  amountCents: Cents;
+  identification: IdentificationValues;
 }
 
 export interface Receipt {
-  token: string;
-  number: string;
-  schoolName: string;
-  apmName: string;
-  description: string;
+  /** O comprovante so existe pago (a API responde 409 antes disso). */
+  status: "PAID";
+  referenceCode: string;
   amountCents: Cents;
-  status: PixChargeStatus;
-  paidAt: string | null;
-  identification: IdentificationValues;
+  paidAt: string;
+  schoolName: string;
+  /** Forma de pagamento como a API manda (PIX, CASH, TRANSFER, OTHER). */
+  method: string;
 }
 
 // ---------------------------------------------------------------- PROPOSTA: painel
@@ -212,29 +213,11 @@ export interface DashboardData {
 
 // ---------------------------------------------------------------- interface de dados (mock hoje)
 
-export interface SchoolsApi {
-  getPublicSchool(slug: string): Promise<ApiResult<PublicSchool>>;
-}
-
-export interface ContributionsApi {
-  create(input: CreateContributionInput): Promise<ApiResult<{ charge: PixCharge }>>;
-  getCharge(slug: string, token: string): Promise<ApiResult<PixCharge>>;
-  getReceipt(slug: string, token: string): Promise<ApiResult<Receipt>>;
-  /**
-   * So no protótipo: apaga do navegador os dados pessoais (responsável, aluno e turma) guardados
-   * pelo mock, depois que o comprovante foi mostrado. O backend real guarda tudo no servidor e o
-   * navegador nunca retém dado pessoal.
-   */
-  clearPersonalData(slug: string, token: string): Promise<void>;
-}
-
 export interface DashboardApi {
   listOrganizations(): Promise<ApiResult<Organization[]>>;
   getDashboard(schoolId: string): Promise<ApiResult<DashboardData>>;
 }
 
 export interface DataSource {
-  schools: SchoolsApi;
-  contributions: ContributionsApi;
   dashboard: DashboardApi;
 }

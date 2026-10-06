@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { randomToken } from "@/mocks/util";
-import { DEMO_RECEIPT_TOKEN, MIN_TOKEN_LENGTH, isPlausibleSlug, isPlausibleToken } from "./token";
+import { MIN_TOKEN_LENGTH, isPlausibleSlug, isPlausibleToken } from "./token";
 
 describe("isPlausibleToken", () => {
   it("o comprimento minimo corresponde a 128 bits em base64url (22 caracteres)", () => {
@@ -8,14 +7,14 @@ describe("isPlausibleToken", () => {
     expect(Math.ceil((128 / 6))).toBe(22);
   });
 
-  it("aceita tokens de 22 a 64 caracteres seguros para URL e o link de exemplo", () => {
-    for (const ok of [DEMO_RECEIPT_TOKEN, "A".repeat(22), "AbC_123-xyz_AbC_123-xyz_", "a".repeat(64), randomToken()]) {
+  it("aceita tokens de 22 a 64 caracteres seguros para URL (a API gera 43)", () => {
+    for (const ok of ["A".repeat(22), "AbC_123-xyz_AbC_123-xyz_", "a".repeat(43), "a".repeat(64)]) {
       expect(isPlausibleToken(ok)).toBe(true);
     }
   });
 
   it("recusa formatos curtos, longos ou perigosos", () => {
-    for (const bad of ["", "abc", "teste1", "a".repeat(21), "a".repeat(65), "../etc/passwd", "a b c d e f g h i j k l", "<script>alert(1)</script>", "tok%20en".repeat(4), "tok/en1".repeat(4), "tök3n".repeat(5), "demo-comprovante-0002"]) {
+    for (const bad of ["", "abc", "teste1", "a".repeat(21), "a".repeat(65), "../etc/passwd", "a b c d e f g h i j k l", "<script>alert(1)</script>", "tok%20en".repeat(4), "tok/en1".repeat(4), "tök3n".repeat(5), "demo-comprovante-0001"]) {
       expect(isPlausibleToken(bad)).toBe(false);
     }
   });
@@ -23,8 +22,8 @@ describe("isPlausibleToken", () => {
 
 describe("isPlausibleSlug", () => {
   it("aceita slugs em minusculas com hifen", () => {
-    expect(isPlausibleSlug("escola-exemplo")).toBe(true);
-    expect(isPlausibleSlug("emei-vale-verde")).toBe(true);
+    expect(isPlausibleSlug("demo-aurora")).toBe(true);
+    expect(isPlausibleSlug("demo-central")).toBe(true);
   });
 
   it("recusa o resto", () => {

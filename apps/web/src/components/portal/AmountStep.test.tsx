@@ -2,10 +2,10 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it } from "vitest";
-import { SCHOOLS } from "@/mocks/fixtures";
+import { SCHOOL } from "@/test-utils/public-fixtures";
 import { AmountStep, CUSTOM_CHOICE } from "./AmountStep";
 
-const school = SCHOOLS[0]!;
+const school = SCHOOL;
 
 function Harness({ initial = 0 }: { initial?: number }) {
   const [cents, setCents] = useState(initial);
@@ -78,5 +78,35 @@ describe("N10: colar no campo de valor interpreta REAIS", () => {
     render(<Harness />);
     await userEvent.setup().type(field(), "1550");
     expect(field().value).toBe("15,50");
+  });
+});
+
+describe("opcoes de valor vindas da escola", () => {
+  const renderStep = (overrides: Partial<typeof SCHOOL> = {}, choice: string | null = null) =>
+    render(
+      <AmountStep
+        school={{ ...SCHOOL, ...overrides }}
+        choice={choice}
+        customCents={0}
+        error={null}
+        headingRef={() => {}}
+        onChoice={() => {}}
+        onCustomChange={() => {}}
+        onContinue={() => {}}
+      />,
+    );
+
+  it("mostra os valores sugeridos e 'Outro valor' com os limites da API", () => {
+    renderStep();
+    expect(screen.getAllByRole("radio")).toHaveLength(4);
+    expect(screen.getByText(/R\$\s20,00/)).toBeInTheDocument();
+    expect(screen.getByText(/R\$\s40,00/)).toBeInTheDocument();
+    expect(screen.getByText(/Entre R\$\s10,00 e R\$\s5\.000,00/)).toBeInTheDocument();
+  });
+
+  it("allow_custom_amount=false: so os valores sugeridos, sem 'Outro valor'", () => {
+    renderStep({ allowCustomAmount: false });
+    expect(screen.getAllByRole("radio")).toHaveLength(3);
+    expect(screen.queryByText("Outro valor")).not.toBeInTheDocument();
   });
 });

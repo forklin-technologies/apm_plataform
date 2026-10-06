@@ -3,7 +3,13 @@ import type { Receipt } from "@/lib/api/types";
 import { formatDateTime } from "@/lib/format";
 import { formatBRL } from "@/lib/money";
 import { pixStatusView } from "@/lib/status";
-import { FIELD_LABELS, IDENTIFICATION_FIELDS } from "@/lib/validation";
+
+const METHOD_LABELS: Record<string, string> = {
+  PIX: "Pix",
+  CASH: "Dinheiro",
+  TRANSFER: "Transferência",
+  OTHER: "Outra forma",
+};
 
 /** Selo "Pago": so aparece quando o status devolvido pela camada de dados e PAID. */
 export function PaidStamp({ animate = false, size = 112 }: { animate?: boolean; size?: number }) {
@@ -67,27 +73,25 @@ function ZigzagEdge() {
 export function ReceiptCard({ receipt, headingLevel = 2 }: { receipt: Receipt; headingLevel?: 2 | 3 }) {
   const status = pixStatusView(receipt.status);
   const Heading = `h${headingLevel}` as "h2" | "h3";
-  const rows: Array<[string, string]> = [["Contribuição", receipt.description]];
-  for (const field of IDENTIFICATION_FIELDS) {
-    const value = receipt.identification[field];
-    if (value) rows.push([FIELD_LABELS[field], value]);
-  }
-  if (receipt.paidAt) rows.push(["Pago em", formatDateTime(receipt.paidAt)]);
+  const rows: Array<[string, string]> = [
+    ["Forma de pagamento", METHOD_LABELS[receipt.method] ?? receipt.method],
+    ["Pago em", formatDateTime(receipt.paidAt)],
+  ];
 
   return (
     <div className="receipt-wrap">
-      <article className="receipt-sheet relative overflow-hidden" aria-label={`Comprovante número ${receipt.number}`}>
+      <article className="receipt-sheet relative overflow-hidden" aria-label={`Comprovante número ${receipt.referenceCode}`}>
         <div className="h-2 bg-accent" aria-hidden="true" />
         <div className="px-6 pb-7 pt-6 sm:px-8">
           <header className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <Heading className="text-headline text-ink">{receipt.apmName}</Heading>
+              <Heading className="text-headline text-ink">{receipt.schoolName}</Heading>
               <p className="mt-0.5 text-foot text-ink-2">Comprovante de contribuição</p>
             </div>
             <p className="shrink-0 text-right text-foot text-ink-2">
               Nº
               <br />
-              <span className="font-semibold tabular-nums text-ink">{receipt.number}</span>
+              <span className="font-semibold tabular-nums text-ink">{receipt.referenceCode}</span>
             </p>
           </header>
 
