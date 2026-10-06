@@ -55,11 +55,15 @@ services:
       PUBLIC_ORIGINS: ${PUBLIC_ORIGINS:-}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
       OUTBOX_DIR: /outbox
+      # Expense attachments (TASK-007): files on a volume, never in the database or the repository.
+      ATTACHMENTS_DIR: /attachments
+      ATTACHMENT_MAX_BYTES: ${ATTACHMENT_MAX_BYTES:-10485760}
       # Which peers uvicorn believes about X-Forwarded-For: only the reverse proxy's address. With
       # no proxy in front keep the default (nothing forwarded is trusted).
       FORWARDED_ALLOW_IPS: ${TRUSTED_PROXY_IPS:-127.0.0.1}
     volumes:
       - outbox:/outbox
+      - attachments:/attachments
     ports:
       - "127.0.0.1:${API_HOST_PORT:-8001}:8000"
     depends_on:
@@ -118,3 +122,5 @@ volumes:
   db_data:
   # Development e-mail outbox (invitation links, password notices), files with mode 0600.
   outbox:
+  # The files attached to expenses (receipts), mode 0700, owned by the API user.
+  attachments:

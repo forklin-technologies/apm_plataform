@@ -11,6 +11,7 @@ from app.core.errors import install_error_handlers
 from app.core.middleware import OriginCheckMiddleware, RequestIdMiddleware
 from app.db.posture import PostureError, assert_posture
 from app.db.session import build_engine, build_session_factory
+from app.expenses.router import router as expenses_router
 from app.routers.api import api_router
 
 
@@ -54,6 +55,7 @@ def create_app(
     app.add_middleware(OriginCheckMiddleware, allowed_origins=settings.allowed_origins)
     app.add_middleware(RequestIdMiddleware)
     app.include_router(api_router)
+    app.include_router(expenses_router, prefix="/api/v1")  # TASK-007: expenses
     _document_security(app, settings)
     return app
 

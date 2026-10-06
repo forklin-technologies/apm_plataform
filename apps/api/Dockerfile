@@ -10,9 +10,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:$PATH"
 RUN groupadd --system --gid 10001 app \
  && useradd --system --uid 10001 --gid app --no-create-home --shell /usr/sbin/nologin app \
- && mkdir /app /outbox \
- && chown app:app /app /outbox \
- && chmod 700 /outbox
+ && mkdir /app /outbox /attachments \
+ && chown app:app /app /outbox /attachments \
+ && chmod 700 /outbox /attachments
 WORKDIR /app
 
 FROM base AS uv-base
