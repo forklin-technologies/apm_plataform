@@ -33,6 +33,8 @@ export interface ApiError {
   /** Retry-After (segundos) de um 429, ja limitado a um intervalo razoavel. */
   retryAfterSeconds?: number;
   fields?: FieldError[];
+  /** Mes (YYYY-MM) que a API nomeia em `closing_out_of_sequence`: o proximo a fechar. Nada alem do mes. */
+  detailPeriod?: string;
 }
 
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; error: ApiError };
@@ -247,3 +249,126 @@ export interface CashContributionResult {
   method: string;
 }
 
+
+// ---------------------------------------------------------------- REAL: despesas (docs/expenses.md)
+
+export type ExpenseStatus = "DRAFT" | "SUBMITTED" | "CORRECTION_REQUESTED" | "APPROVED" | "REJECTED" | "PAID" | "CANCELLED";
+export type PaidBy = "APM" | "COLLABORATOR";
+export type PaymentMethod = "PIX" | "CARD" | "CASH" | "OTHER";
+export type AttachmentKind = "INVOICE" | "PAYMENT_PROOF" | "OTHER";
+
+export interface ExpenseCategory {
+  id: string;
+  key: string;
+  name: string;
+}
+
+export interface ExpenseSummary {
+  id: string;
+  referenceCode: number;
+  status: ExpenseStatus;
+  amountCents: Cents;
+  /** So depois da aprovacao (pode ser menor que o pedido quando um colaborador pagou). */
+  approvedAmountCents: Cents | null;
+  category: ExpenseCategory;
+  occurredAt: string;
+  description: string;
+  vendor: string | null;
+  paidBy: PaidBy;
+  /** A API devolve so o id de quem enviou (nao o nome): o site compara com o usuario da sessao. */
+  submittedByUserId: string;
+  attachmentsCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Attachment {
+  id: string;
+  kind: AttachmentKind;
+  fileName: string;
+  contentType: string;
+  sizeBytes: number;
+  uploadedByUserId: string;
+  createdAt: string;
+}
+
+export interface Reimbursement {
+  id: string;
+  status: "PENDING" | "PAID" | "CANCELLED";
+  amountCents: Cents;
+  beneficiaryUserId: string;
+  paidByUserId: string | null;
+  paymentReference: string | null;
+  settledAt: string | null;
+  createdAt: string;
+}
+
+export interface ExpenseDetail extends ExpenseSummary {
+  purchaseReason: string | null;
+  paymentMethod: PaymentMethod | null;
+  approvedByUserId: string | null;
+  approvedAt: string | null;
+  decisionReason: string | null;
+  /** O motivo que a gestao escreveu ao pedir correcao. */
+  correctionReason: string | null;
+  settledAt: string | null;
+  attachments: Attachment[];
+  reimbursement: Reimbursement | null;
+}
+
+export interface ExpenseInput {
+  amountCents: Cents;
+  /** Dia (YYYY-MM-DD, meio-dia no fuso da escola) ou instante ISO com fuso. */
+  occurredAt: string;
+  categoryId: string;
+  description: string;
+  vendor?: string;
+  purchaseReason?: string;
+  paymentMethod?: PaymentMethod;
+  paidBy: PaidBy;
+}
+
+export type ExpenseUpdate = Partial<Omit<ExpenseInput, "paidBy">>;
+
+// ---------------------------------------------------------------- REAL: fechamento mensal (docs/statement.md)
+
+/** Fechamento do mes: numeros de statement_summary congelados, mais o codigo de verificacao. */
+export interface Closing {
+  id: string;
+  schoolId: string;
+  period: string;
+  periodStart: string;
+  periodEnd: string;
+  timezone: string;
+  openingBalanceCents: Cents;
+  contributionsInCents: Cents;
+  otherInCents: Cents;
+  refundsInCents: Cents;
+  totalInCents: Cents;
+  expensesOutCents: Cents;
+  reimbursementsOutCents: Cents;
+  totalOutCents: Cents;
+  /** Saldo PRINCIPAL: em caixa. */
+  closingBalanceCents: Cents;
+  pendingReimbursementsCents: Cents;
+  /** Saldo SECUNDARIO. */
+  closingAfterPendingCents: Cents;
+  entriesCount: number;
+  /** Codigo de verificacao do fechamento. */
+  entriesHash: string;
+  bankBalanceReportedCents: Cents | null;
+  /** Banco menos caixa. */
+  bankDifferenceCents: Cents | null;
+  closedAt: string;
+  reportRef: string | null;
+  /** Preenchido = fechamento REABERTO (sem PDF). */
+  reopenedAt: string | null;
+  /** Texto livre que a gestao escreveu: so para quem pode ver (o viewer nao recebe). */
+  reopenReason: string | null;
+}
+
+export interface ClosingVerification {
+  closingId: string;
+  verified: boolean;
+  entriesHash: string;
+}

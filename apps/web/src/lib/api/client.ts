@@ -62,13 +62,28 @@ function toApiError(response: Response, body: unknown): ApiError {
   if (retry !== undefined) error.retryAfterSeconds = retry;
   const fields = parseFieldErrors(body.errors);
   if (fields) error.fields = fields;
+  // A unica parte do `detail` que o site usa: o MES que o servidor nomeia ("The next month to close is
+  // 2026-02"). So o formato YYYY-MM sobrevive; o texto do servidor nunca vai para a tela.
+  if (body.code === "closing_out_of_sequence" && typeof body.detail === "string") {
+    const month = /\b(\d{4}-(?:0[1-9]|1[0-2]))\b/.exec(body.detail);
+    if (month) error.detailPeriod = month[1];
+  }
   return error;
 }
 
 interface Init {
   method: string;
   body?: unknown;
+  /** Corpo multipart (upload): o navegador define o Content-Type com o boundary. */
+  form?: FormData;
   csrf: boolean;
+  /** Resposta binaria (PDF, anexo): em caso de sucesso entrega o Blob; em erro, o problem+json de sempre. */
+  blob?: boolean;
+}
+
+export interface BlobPayload {
+  blob: Blob;
+  contentType: string;
 }
 
 async function request<T>(
@@ -94,7 +109,7 @@ async function request<T>(
   if (signal?.aborted) controller.abort();
 
   try {
-    const headers: Record<string, string> = { ...options.headers, Accept: "application/json" };
+    const headers: Record<string, string> = { ...options.headers, Accept: init.blob ? "*/*" : "application/json" };
     if (init.body !== undefined) headers["Content-Type"] = "application/json";
     if (init.csrf) {
       const token = options.csrfToken === undefined ? readCsrfToken() : options.csrfToken;
@@ -103,11 +118,18 @@ async function request<T>(
     const response = await fetchImpl(path, {
       method: init.method,
       headers,
-      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+      body: init.form ?? (init.body === undefined ? undefined : JSON.stringify(init.body)),
       cache: "no-store",
       credentials: "same-origin",
       signal: controller.signal,
     });
+
+    if (init.blob && response.ok) {
+      const blob = await response.blob();
+      const payload: BlobPayload = { blob, contentType: response.headers.get("Content-Type") ?? blob.type };
+      const parsedBlob = parse(payload, response.status);
+      return parsedBlob !== null ? { ok: true, data: parsedBlob } : { ok: false, error: { kind: "invalid-response", status: response.status } };
+    }
 
     let body: unknown = null;
     try {
@@ -144,4 +166,21 @@ export function apiSend<T>(
   options: SendOptions = {},
 ): Promise<ApiResult<T>> {
   return request(path, { method, body, csrf: true }, parse, options, SEND_TIMEOUT_MS);
+}
+
+const UPLOAD_TIMEOUT_MS = 60_000;
+
+/** POST multipart (upload de anexo). O conteudo do arquivo so vai no corpo: nunca em URL, log ou storage. */
+export function apiUpload<T>(
+  path: string,
+  form: FormData,
+  parse: (body: unknown, status: number) => T | null,
+  options: SendOptions = {},
+): Promise<ApiResult<T>> {
+  return request(path, { method: "POST", form, csrf: true }, parse, options, UPLOAD_TIMEOUT_MS);
+}
+
+/** GET de um arquivo (PDF, anexo) pela API, com o cookie de sessao. Nunca ha URL publica do arquivo. */
+export function apiBlob(path: string, options: RequestOptions = {}): Promise<ApiResult<BlobPayload>> {
+  return request(path, { method: "GET", csrf: false, blob: true }, (payload) => payload as BlobPayload, options, UPLOAD_TIMEOUT_MS);
 }
