@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 from sqlalchemy import Engine, text
 
+from app.reports import queries
 from tests.authsupport import Api
 from tests.statement.conftest import MARCH, Login, Scene
 from tests.statement.pdftext import pages_of, text_of
@@ -311,7 +312,6 @@ def test_the_reference_is_only_ever_written_on_an_active_closing(
     from sqlalchemy.orm import Session
 
     from app.db.tenant import TenantContext, bind_tenant
-    from app.reports import queries
 
     created = close_march(login, scene)
     assert reopen(login(scene.users["admin"]), scene, created["id"]).status_code == 200
@@ -326,3 +326,46 @@ def test_the_reference_is_only_ever_written_on_an_active_closing(
         ).scalar_one()
 
     assert stored is None  # a reopened closing was superseded: nothing is recorded on it
+
+
+def test_a_race_with_the_ledger_is_read_again_once_before_it_looks_like_tampering(
+    scene: Scene, login: Login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created = close_march(login, scene)
+    real = queries.period_entries
+    reads: list[int] = []
+
+    def short_the_first_time(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        reads.append(1)
+        rows = real(*args, **kwargs)
+        return rows[:-1] if len(reads) == 1 else rows  # an entry "not there yet" on the first read
+
+    monkeypatch.setattr("app.reports.routes.queries.period_entries", short_the_first_time)
+
+    response = login(scene.users["treasurer"]).get(report_path(scene, created["id"]))
+
+    assert response.status_code == 200, response.text
+    assert len(reads) == 2
+    assert "Subtotal de devoluções (1) R$ 5,00" in text_of(response.content)  # the full ledger
+
+
+def test_a_second_miss_is_a_409_and_writes_nothing(
+    scene: Scene, login: Login, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    created = close_march(login, scene)
+    real = queries.period_entries
+    reads: list[int] = []
+
+    def always_short(*args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+        reads.append(1)
+        return real(*args, **kwargs)[:-1]
+
+    monkeypatch.setattr("app.reports.routes.queries.period_entries", always_short)
+    treasurer = login(scene.users["treasurer"])
+
+    response = treasurer.get(report_path(scene, created["id"]))
+
+    assert (response.status_code, response.json()["code"]) == (409, "closing_mismatch")
+    assert len(reads) == 2  # tried once more, no more than that
+    detail = treasurer.get(closings(scene.fresh.school, f"/{created['id']}")).json()
+    assert detail["report_ref"] is None

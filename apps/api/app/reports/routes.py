@@ -67,10 +67,10 @@ def closing_report_pdf(
     db: TenantDb,
 ) -> Response:
     """Drawn from the stored snapshot of an ACTIVE closing, never recomputed: the sections must add
-    up to the figures of the closing or no PDF is made (409 `closing_mismatch`). Whoever lacks
-    `reports:read` (the `viewer`) gets the version without personal data. `report_ref` is written
-    the first time MANAGEMENT makes a PDF of an active closing, and never again: a read-only role
-    draws the PDF and writes nothing."""
+    up to the figures of the closing, read again once if they do not, or no PDF is made (409
+    `closing_mismatch`). Whoever lacks `reports:read` (the `viewer`) gets the version without
+    personal data. `report_ref` is written the first time MANAGEMENT makes a PDF of an active
+    closing, and never again: a read-only role draws the PDF and writes nothing."""
     closing = get_closing(db, scope.school_id, closing_id)
     if closing is None:
         raise not_found()
@@ -80,23 +80,31 @@ def closing_report_pdf(
     organization_name, school_name = queries.names(db, scope.school_id)
     generated_at = datetime.now(UTC)
     management = Permission.REPORTS_READ in permissions_for(principal.role)
-    try:
-        report = build_closing_report(
-            closing=closing,
-            entries=queries.period_entries(
-                db, scope.school_id, closing["period_start"], closing["period_end"]
-            ),
-            pending=queries.pending_entries(db, scope.school_id),
-            category_names=queries.category_names(db, scope.school_id),
-            organization_name=organization_name,
-            school_name=school_name,
-            generated_at=generated_at,
-            personal_data=management,
-        )
-    except ReportMismatch:
-        raise ProblemError(
-            409, "closing_mismatch", "The ledger no longer matches the snapshot of this closing"
-        ) from None
+    for attempt in (1, 2):
+        # The entries, the pending list and the categories are separate statements: a late
+        # adjustment that lands between them makes the sections disagree with the snapshot, which
+        # looks like tampering and is only a race. Read again once; a second miss is a 409.
+        try:
+            report = build_closing_report(
+                closing=closing,
+                entries=queries.period_entries(
+                    db, scope.school_id, closing["period_start"], closing["period_end"]
+                ),
+                pending=queries.pending_entries(db, scope.school_id),
+                category_names=queries.category_names(db, scope.school_id),
+                organization_name=organization_name,
+                school_name=school_name,
+                generated_at=generated_at,
+                personal_data=management,
+            )
+            break
+        except ReportMismatch:
+            if attempt == 2:
+                raise ProblemError(
+                    409,
+                    "closing_mismatch",
+                    "The ledger no longer matches the snapshot of this closing",
+                ) from None
     content = render_closing_report(report)
 
     if management and closing["report_ref"] is None:
