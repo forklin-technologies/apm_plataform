@@ -14,6 +14,7 @@ import { areasFor, type PainelArea } from "@/lib/permissions";
 import { ROLE_LABELS, membershipTitle } from "@/lib/roles";
 import { ContextChooser } from "./ContextChooser";
 import { ExpensesArea } from "@/components/despesas/ExpensesArea";
+import { ClosingsArea } from "@/components/fechamento/ClosingsArea";
 import { KIND_META } from "./kinds";
 import { navFor } from "./nav";
 import { PainelData } from "./PainelData";
@@ -178,6 +179,8 @@ export function PainelShell({ session, area = "resumo", section = "resumo", tab 
 
           {schoolId && area === "despesas" ? (
             <ExpensesArea key={schoolId} schoolId={schoolId} userId={session.user.id} permissions={active.permissions} tab={tab} />
+          ) : schoolId && area === "fechamento" ? (
+            <ClosingsArea key={schoolId} schoolId={schoolId} permissions={active.permissions} />
           ) : schoolId ? (
             <PainelData
               // Trocar de vinculo troca de escola: o estado dos numeros recomeca do zero.
