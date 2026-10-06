@@ -1,0 +1,115 @@
+name: CI
+
+# The minimum gate of the MVP (ADR-017): the API tests, the site tests and build, a secret scan of the
+# whole history and an audit of the locked dependencies. How to run each of them on a laptop, and
+# how to add an exception, is in docs/ci.md. Nothing here deploys anything and nothing needs a secret.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api:
+    name: API (ruff, mypy, posture, pytest on Postgres 16)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Throwaway values for this run only: the database lives and dies inside the runner.
+      - name: Create .env with random throwaway secrets
+        run: |
+          cp .env.example .env
+          for name in POSTGRES_PASSWORD APP_DB_PASSWORD; do
+            value="$(openssl rand -hex 24)"; echo "::add-mask::$value"
+            sed -i "s|^${name}=.*|${name}=${value}|" .env
+          done
+          value="$(openssl rand -hex 32)"; echo "::add-mask::$value"
+          sed -i "s|^AUTH_SECRET=.*|AUTH_SECRET=${value}|" .env
+          docker compose config --quiet
+
+      - name: Build the tools image (the API with its dev dependencies)
+        run: docker compose --profile tools build tools
+
+      - name: Start the two Postgres clusters
+        run: |
+          docker compose up -d --wait db
+          docker compose --profile tools up -d --wait db-clean
+
+      - name: Migrate, check and test
+        run: |
+          T() { docker compose --profile tools run --rm --no-deps -T -v "$PWD/docs:/docs:ro" tools "$@"; }
+          T alembic upgrade head
+          T ruff check .
+          T ruff format --check .
+          T mypy .
+          T python -m app.posture
+          T pytest -q -p no:cacheprovider
+
+      - name: Logs of the databases (only when something failed)
+        if: failure()
+        run: docker compose --profile tools logs --no-color --tail=80 db db-clean
+
+  web:
+    name: Site (typecheck, lint, unit tests, build)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  secrets:
+    name: Secret scan (gitleaks, whole history)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # The repository is public: any real credential in any commit is a leak. The configuration only
+      # names the fake values of the tests (see .gitleaks.toml); the default rules stay on.
+      - name: gitleaks
+        run: |
+          docker run --rm -v "$PWD:/repo" \
+            -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
+            ghcr.io/gitleaks/gitleaks:v8.21.2 detect \
+            --source=/repo --config=/repo/.gitleaks.toml --redact --no-banner
+
+  audit:
+    name: Dependency audit (pip-audit, npm audit)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: pip-audit on the locked Python dependencies
+        working-directory: apps/api
+        run: |
+          uv export --frozen --no-hashes --no-emit-project --format requirements-txt > "$RUNNER_TEMP/requirements.txt"
+          uvx pip-audit==2.9.0 --requirement "$RUNNER_TEMP/requirements.txt" --no-deps --disable-pip --strict
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: npm audit on the production dependencies of the site
+        working-directory: apps/web
+        run: npm audit --omit=dev --audit-level=high

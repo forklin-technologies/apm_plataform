@@ -1,0 +1,21 @@
+# Secret scan of the CI (and of anybody running `gitleaks detect` locally).
+# The repository is public: a real credential here is a leak, so the default rules stay on and the
+# list below names only the FAKE values the tests and the removed mock layer use, one by one. A new
+# fake value that trips a rule is added here on purpose, with a reason; a path is never allowed as a
+# whole, so a real token pasted into a test file is still caught.
+
+title = "APM Digital"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "fake values of the tests and of the removed prototype mocks (no real credential)"
+regexes = [
+  '''AbCdEfGhIjKlMnOpQrStUvWxYz0123456789_-AbCde''',      # a well-formed receipt token (web fixtures)
+  '''abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG''',      # an invitation token that does not exist
+  '''abcdefghjkmnpqrstuvwxyz23456789''',                  # the alphabet of the old mock token maker
+  '''segredo-senha-123''',                               # a password typed in a unit test
+  '''segredo-tok''',                                     # a token typed in a unit test
+  '''CanaryPw7Hx3Zq''',                                  # the canary password of the migration test
+]
