@@ -11,15 +11,6 @@ test("/apm/{slug} redireciona para /escola/{slug}", async ({ page }) => {
   await expect(page).toHaveURL(/\/escola\/demo-aurora$/);
 });
 
-// A API conta toda consulta que erra (token ou slug inexistente) contra o endereco e bloqueia (429) depois
-// de algumas: por isso so UMA consulta ruim chega a ela aqui. O formato invalido ("curto") nem sai do site.
-test("token ruim no comprovante: 404 de verdade", async ({ request }, testInfo) => {
-  test.skip(!apiAcceptsThisOrigin(), "precisa da API real (E2E_BASE_URL=http://127.0.0.1:3101)");
-  test.skip(testInfo.project.name !== "chromium-desktop", "uma consulta ruim so, para nao bloquear os outros fluxos do mesmo endereco");
-  expect((await request.get("/escola/demo-aurora/pedido/curto")).status()).toBe(404);
-  expect((await request.get("/escola/demo-aurora/pedido/" + "x".repeat(43))).status()).toBe(404);
-});
-
 test("valor livre abaixo do minimo da escola: erro na tela, sem chamar a API", async ({ page }) => {
   test.skip(!apiAcceptsThisOrigin(), "precisa da API real (E2E_BASE_URL=http://127.0.0.1:3101)");
   const posts: string[] = [];
@@ -84,4 +75,13 @@ test("fluxo completo: valor, dados, QR, simular pagamento, comprovante", async (
   // recarregar: o servidor entrega o comprovante com 200 da API
   await page.reload();
   await expect(page.getByRole("heading", { name: "Contribuição confirmada" })).toBeVisible();
+});
+
+// A API conta toda consulta que erra (token ou slug inexistente) contra o endereco e bloqueia (429) depois
+// de algumas: por isso so UMA consulta ruim chega a ela aqui. O formato invalido ("curto") nem sai do site.
+test("token ruim no comprovante: 404 de verdade", async ({ request }, testInfo) => {
+  test.skip(!apiAcceptsThisOrigin(), "precisa da API real (E2E_BASE_URL=http://127.0.0.1:3101)");
+  test.skip(testInfo.project.name !== "chromium-desktop", "uma consulta ruim so, para nao bloquear os outros fluxos do mesmo endereco");
+  expect((await request.get("/escola/demo-aurora/pedido/curto")).status()).toBe(404);
+  expect((await request.get("/escola/demo-aurora/pedido/" + "x".repeat(43))).status()).toBe(404);
 });
