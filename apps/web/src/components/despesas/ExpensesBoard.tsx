@@ -100,6 +100,7 @@ export function ExpensesBoard({ schoolId, userId, permissions, scope }: Props) {
               onClick={() => {
                 setFilter(f.status);
                 setOpenId(null);
+                setBanner(null);
               }}
               className={`min-h-11 rounded-full px-4 text-sub font-semibold transition-colors ${filter === f.status ? "bg-ink text-bg" : "bg-neutral-soft text-ink hover:brightness-[0.97]"}`}
             >
@@ -185,7 +186,17 @@ export function ExpensesBoard({ schoolId, userId, permissions, scope }: Props) {
                   </Button>
                 </div>
                 {open && (
-                  <ExpenseDetailPanel schoolId={schoolId} expenseId={e.id} userId={userId} permissions={permissions} categories={categories} onChanged={reload} />
+                  <ExpenseDetailPanel
+                    schoolId={schoolId}
+                    expenseId={e.id}
+                    userId={userId}
+                    permissions={permissions}
+                    categories={categories}
+                    onChanged={(message) => {
+                      if (message) setBanner(message);
+                      reload();
+                    }}
+                  />
                 )}
               </li>
             );

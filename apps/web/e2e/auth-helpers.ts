@@ -34,10 +34,36 @@ export async function loginAs(page: Page, email = CARLA.email): Promise<void> {
   await page.getByLabel("E-mail").fill(email);
   await page.getByLabel("Senha").fill(password);
   await page.getByRole("button", { name: "Entrar" }).click();
-  await expect(page).toHaveURL(/\/painel$/);
+  // quem nao ve o resumo (professora) cai em /painel/despesas
+  await expect(page).toHaveURL(/\/painel(\/despesas)?$/);
 }
 
 /** A API so aceita pedidos que mudam dados das origens :3100 e :3101 (PUBLIC_ORIGINS de desenvolvimento). */
 export function apiAcceptsThisOrigin(): boolean {
   return /^http:\/\/(127\.0\.0\.1|localhost):310[01]$/.test(process.env.E2E_BASE_URL ?? "");
+}
+
+export const PAULA = { email: "paula.professora@example.test", name: "Paula Professora (demo)" };
+export const BRUNO = { email: "bruno.diretor@example.test", name: "Bruno Diretor (demo)" };
+
+/** Identificador unico por execucao: o banco de demonstracao e compartilhado e persistente. */
+export function uniqueTag(prefix = "E2E"): string {
+  return `${prefix} ${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+/** Um PDF minimo e unico (a API reconhece o tipo pelos primeiros bytes; o mesmo arquivo so entra uma vez por despesa). */
+export function tinyPdf(tag: string): { name: string; mimeType: string; buffer: Buffer } {
+  return { name: "nota-e2e.pdf", mimeType: "application/pdf", buffer: Buffer.from(`%PDF-1.4\n% ${tag}\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n`) };
+}
+
+/** Sessao de API (sem navegador) para preparar ou desfazer dados de demonstracao. So em tempo de execucao. */
+export async function apiSession(playwright: import("@playwright/test").PlaywrightWorkerArgs["playwright"], baseURL: string, email: string) {
+  const context = await playwright.request.newContext({ baseURL, extraHTTPHeaders: { Origin: baseURL } });
+  const login = await context.post("/api/v1/auth/login", { data: { email, password: demoPassword()! } });
+  if (!login.ok()) throw new Error(`login de ${email} falhou (${login.status()})`);
+  const state = await context.storageState();
+  const csrf = state.cookies.find((c) => c.name === "apm_csrf")?.value ?? "";
+  const body = (await login.json()) as { active_membership: { school: { id: string } | null } | null; memberships: Array<{ school: { id: string } | null }> };
+  const schoolId = body.active_membership?.school?.id ?? body.memberships.find((m) => m.school)?.school?.id ?? "";
+  return { context, csrf, schoolId };
 }

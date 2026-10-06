@@ -54,7 +54,7 @@ describe("professora (autora)", () => {
 
   it("anexa o arquivo: manda INVOICE para a API e recarrega o detalhe; erro attachments_closed em portugues", async () => {
     const upload = vi.spyOn(api.expenses, "upload").mockResolvedValue({ ok: false, error: { kind: "problem", status: 409, code: "attachments_closed" } });
-    const { user } = setup(detail({ status: "DRAFT", attachments: [] }), AUTHOR_ID, STAFF);
+    const { user, onChanged } = setup(detail({ status: "DRAFT", attachments: [] }), AUTHOR_ID, STAFF);
     const input = await screen.findByLabelText("Anexar a nota ou o recibo");
     await user.upload(input, new File(["%PDF-1.4"], "nota.pdf", { type: "application/pdf" }));
     expect(upload).toHaveBeenCalledWith(SCHOOL_ID, expect.any(String), expect.any(File), "INVOICE");
@@ -63,7 +63,7 @@ describe("professora (autora)", () => {
     upload.mockResolvedValue({ ok: true, data: { id: "a2", kind: "INVOICE", fileName: "nota.pdf", contentType: "application/pdf", sizeBytes: 8, uploadedByUserId: AUTHOR_ID, createdAt: "2026-10-06T14:00:00Z" } });
     vi.spyOn(api.expenses, "get").mockResolvedValue(ok(detail({ status: "DRAFT" })));
     await user.upload(input, new File(["%PDF-1.4 outro"], "outra.pdf", { type: "application/pdf" }));
-    expect(await screen.findByText("Arquivo anexado.")).toBeInTheDocument();
+    await waitFor(() => expect(onChanged).toHaveBeenCalledWith("Arquivo anexado."));
   });
 
   it("envia para analise: mostra o que a API devolveu (enviada) e avisa a lista", async () => {
@@ -71,9 +71,8 @@ describe("professora (autora)", () => {
     const { user, onChanged } = setup(detail({ status: "DRAFT" }), AUTHOR_ID, STAFF);
     await user.click(await screen.findByRole("button", { name: "Enviar para análise" }));
     expect(submit).toHaveBeenCalledWith(SCHOOL_ID, expect.any(String));
-    expect(await screen.findByText("Despesa enviada para a análise da gestão.")).toBeInTheDocument();
-    expect(screen.getByText("Enviada")).toBeInTheDocument();
-    expect(onChanged).toHaveBeenCalled();
+    await waitFor(() => expect(onChanged).toHaveBeenCalledWith("Despesa enviada para a análise da gestão."));
+    expect(await screen.findByText("Enviada")).toBeInTheDocument();
   });
 
   it("envio incompleto (422): diz o que falta; 409: recarrega o detalhe", async () => {
@@ -117,17 +116,17 @@ describe("gestao (tesoureira)", () => {
 
   it("aprova pelo valor pedido (sem corpo)", async () => {
     const approve = vi.spyOn(api.expenses, "approve").mockResolvedValue(ok(detail({ status: "APPROVED" })));
-    const { user } = setup(detail({ status: "SUBMITTED" }), MANAGER_ID, TREASURER);
+    const { user, onChanged } = setup(detail({ status: "SUBMITTED" }), MANAGER_ID, TREASURER);
     await user.click(await screen.findByRole("button", { name: "Aprovar" }));
     await user.click(screen.getByRole("button", { name: "Aprovar" }));
     expect(approve).toHaveBeenCalledWith(SCHOOL_ID, expect.any(String), {});
-    expect(await screen.findByText("Despesa aprovada.")).toBeInTheDocument();
+    await waitFor(() => expect(onChanged).toHaveBeenCalledWith("Despesa aprovada."));
     expect(screen.getByText("Reembolso pendente")).toBeInTheDocument();
   });
 
   it("aprovacao PARCIAL (colaborador pagou): valor menor e motivo vao para a API; valida antes", async () => {
     const approve = vi.spyOn(api.expenses, "approve").mockResolvedValue(ok(detail({ status: "APPROVED", approvedAmountCents: 17500 })));
-    const { user } = setup(detail({ status: "SUBMITTED", paidBy: "COLLABORATOR", amountCents: 20000 }), MANAGER_ID, TREASURER);
+    const { user, onChanged } = setup(detail({ status: "SUBMITTED", paidBy: "COLLABORATOR", amountCents: 20000 }), MANAGER_ID, TREASURER);
     await user.click(await screen.findByRole("button", { name: "Aprovar" }));
     await user.click(screen.getByLabelText("Um valor menor (aprovação parcial)"));
     await user.click(screen.getByRole("button", { name: "Aprovar valor menor" }));
@@ -139,7 +138,7 @@ describe("gestao (tesoureira)", () => {
     await user.type(screen.getByLabelText("Motivo da diferença"), "Sem o frete");
     await user.click(screen.getByRole("button", { name: "Aprovar valor menor" }));
     expect(approve).toHaveBeenCalledWith(SCHOOL_ID, expect.any(String), { approvedAmountCents: 17500, reason: "Sem o frete" });
-    expect(await screen.findByText("Despesa aprovada.")).toBeInTheDocument();
+    await waitFor(() => expect(onChanged).toHaveBeenCalledWith("Despesa aprovada."));
   });
 
   it("despesa paga pela APM: so aprovacao pelo valor pedido (sem opcao parcial)", async () => {
@@ -161,7 +160,7 @@ describe("gestao (tesoureira)", () => {
 
   it("recusar e pedir correcao exigem motivo (3 a 500) e o enviam", async () => {
     const reject = vi.spyOn(api.expenses, "reject").mockResolvedValue(ok(detail({ status: "REJECTED", decisionReason: "Não é da APM" })));
-    const { user } = setup(detail({ status: "SUBMITTED" }), MANAGER_ID, TREASURER);
+    const { user, onChanged } = setup(detail({ status: "SUBMITTED" }), MANAGER_ID, TREASURER);
     await user.click(await screen.findByRole("button", { name: "Recusar" }));
     await user.click(screen.getByRole("button", { name: "Recusar despesa" }));
     expect(screen.getByText("O motivo precisa ter de 3 a 500 caracteres.")).toBeInTheDocument();
@@ -169,8 +168,8 @@ describe("gestao (tesoureira)", () => {
     await user.type(screen.getByLabelText("Motivo da recusa"), "Não é da APM");
     await user.click(screen.getByRole("button", { name: "Recusar despesa" }));
     expect(reject).toHaveBeenCalledWith(SCHOOL_ID, expect.any(String), "Não é da APM");
-    expect(await screen.findByText("Despesa recusada.")).toBeInTheDocument();
-    expect(screen.getByText(/Motivo da decisão:/).closest("p")).toHaveTextContent("Não é da APM");
+    await waitFor(() => expect(onChanged).toHaveBeenCalledWith("Despesa recusada."));
+    expect((await screen.findByText(/Motivo da decisão:/)).closest("p")).toHaveTextContent("Não é da APM");
   });
 
   it("pedir correcao envia o motivo", async () => {
@@ -191,17 +190,17 @@ describe("gestao (tesoureira)", () => {
     await first.user.type(screen.getByLabelText("Referência do pagamento"), "PIX E2E123");
     await first.user.click(screen.getByRole("button", { name: "Registrar reembolso" }));
     expect(reimburse).toHaveBeenCalledWith(SCHOOL_ID, expect.any(String), "PIX E2E123");
-    expect(await screen.findByText("Reembolso registrado.")).toBeInTheDocument();
-    expect(screen.getByText("Paga")).toBeInTheDocument();
+    await waitFor(() => expect(first.onChanged).toHaveBeenCalledWith("Reembolso registrado."));
+    expect(await screen.findByText("Paga")).toBeInTheDocument();
   });
 
   it("aprovada paga pela APM: 'Registrar pagamento' chama pay", async () => {
     const pay = vi.spyOn(api.expenses, "pay").mockResolvedValue(ok(detail({ status: "PAID", paidBy: "APM" })));
-    const { user } = setup(detail({ status: "APPROVED", paidBy: "APM" }), MANAGER_ID, TREASURER);
+    const { user, onChanged } = setup(detail({ status: "APPROVED", paidBy: "APM" }), MANAGER_ID, TREASURER);
     expect(screen.queryByRole("button", { name: "Registrar reembolso" })).not.toBeInTheDocument();
     await user.click(await screen.findByRole("button", { name: "Registrar pagamento" }));
     expect(pay).toHaveBeenCalledWith(SCHOOL_ID, expect.any(String));
-    expect(await screen.findByText("Pagamento registrado.")).toBeInTheDocument();
+    await waitFor(() => expect(onChanged).toHaveBeenCalledWith("Pagamento registrado."));
   });
 
   it("aprovada DA PROPRIA pessoa: nao oferece reembolso nem pagamento (so cancelar), e explica", async () => {

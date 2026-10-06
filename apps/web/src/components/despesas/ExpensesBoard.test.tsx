@@ -98,6 +98,23 @@ describe("Fila da gestao", () => {
     expect(screen.queryByRole("button", { name: "Carregar mais" })).not.toBeInTheDocument();
   });
 
+  it("depois de uma acao a despesa pode sair do filtro: a mensagem fica na lista (nao se perde com o painel)", async () => {
+    const list = vi.spyOn(api.expenses, "list")
+      .mockResolvedValueOnce(ok([summary({ description: "Vai sair da fila" })]))
+      .mockResolvedValue(ok([]));
+    vi.spyOn(api.expenses, "get").mockResolvedValue({ ok: true, data: detail() });
+    vi.spyOn(api.expenses, "approve").mockResolvedValue({ ok: true, data: detail({ status: "APPROVED" }) });
+    render(<ExpensesBoard schoolId={SCHOOL_ID} userId={MANAGER_ID} permissions={TREASURER} scope="queue" />);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: /Abrir detalhes/ }));
+    await user.click(await screen.findByRole("button", { name: "Aprovar" }));
+    await user.click(screen.getByRole("button", { name: "Aprovar" }));
+    expect(await screen.findByText("Despesa aprovada.")).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("Vai sair da fila")).not.toBeInTheDocument());
+    expect(screen.getByText("Despesa aprovada.")).toBeInTheDocument();
+    expect(list.mock.calls.length).toBeGreaterThan(1);
+  });
+
   it("marca como 'sua' a despesa que a pessoa enviou e abre o detalhe da fila com as acoes", async () => {
     vi.spyOn(api.expenses, "list").mockResolvedValue(ok([summary({ description: "De colega" })]));
     vi.spyOn(api.expenses, "get").mockResolvedValue({ ok: true, data: detail() });

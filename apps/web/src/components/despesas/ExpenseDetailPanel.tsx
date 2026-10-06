@@ -23,8 +23,8 @@ interface Props {
   userId: string;
   permissions: string[];
   categories: ExpenseCategory[];
-  /** Avisa a lista que algo mudou (para recarregar). */
-  onChanged: () => void;
+  /** Avisa a lista que algo mudou (ela recarrega e mostra a mensagem: a despesa pode sair do filtro e levar o painel junto). */
+  onChanged: (message?: string) => void;
 }
 
 const REASON_RANGE = "O motivo precisa ter de 3 a 500 caracteres.";
@@ -165,7 +165,6 @@ export function ExpenseDetailPanel({ schoolId, expenseId, userId, permissions, c
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fieldError, setFieldError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
 
   const key = `${schoolId}|${expenseId}|${version}`;
@@ -198,10 +197,9 @@ export function ExpenseDetailPanel({ schoolId, expenseId, userId, permissions, c
   function changed(next: ExpenseDetail, message?: string) {
     setOverride(next);
     setMode(null);
-    setNotice(message ?? null);
     setError(null);
     setFieldError(null);
-    onChanged();
+    onChanged(message);
   }
 
   async function run(name: string, call: () => Promise<ApiResult<ExpenseDetail>>, message: string) {
@@ -209,7 +207,6 @@ export function ExpenseDetailPanel({ schoolId, expenseId, userId, permissions, c
     setBusy(name);
     setError(null);
     setFieldError(null);
-    setNotice(null);
     const result = await call();
     setBusy(null);
     if (result.ok) return changed(result.data, message);
@@ -234,7 +231,6 @@ export function ExpenseDetailPanel({ schoolId, expenseId, userId, permissions, c
     if (!file || busy) return;
     setFileError(null);
     setBusy("attach");
-    setNotice(null);
     setError(null);
     const uploaded = await api.expenses.upload(schoolId, d!.id, file, "INVOICE");
     if (!uploaded.ok) {
@@ -267,8 +263,7 @@ export function ExpenseDetailPanel({ schoolId, expenseId, userId, permissions, c
             setOverride(null);
             setMode(null);
             setVersion((n) => n + 1);
-            setNotice("Despesa atualizada.");
-            onChanged();
+            onChanged("Despesa atualizada.");
           }}
         />
       ) : (
@@ -356,7 +351,6 @@ export function ExpenseDetailPanel({ schoolId, expenseId, userId, permissions, c
 
           <div aria-live="polite">
             {error && <p role="alert" className="mt-4 rounded-[var(--r-md)] bg-bad-soft px-4 py-3 text-sub font-medium text-bad">{error}</p>}
-            {notice && <p role="status" className="mt-4 rounded-[var(--r-md)] bg-ok-soft px-4 py-3 text-sub font-medium text-ok">{notice}</p>}
           </div>
 
           {mode === null && (
