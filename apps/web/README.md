@@ -68,22 +68,42 @@ no comando: `npm run start -- -H 0.0.0.0 -p 3000`. O último `-H` vence.
   "Registrar contribuição em dinheiro" (`contributions:record_cash`) e link do PDF das contribuições do mês.
   Rota que responder 403 (o `viewer` só lê o resumo) vira aviso. Vínculo da organização inteira não tem painel
   de escola. Quem tem 2 ou mais vínculos escolhe o contexto como antes.
-- **Simulado**: nada. Não há mais camada de mocks nem selo de protótipo. Ainda **sem tela**: despesas
-  (professor e fila de análise), fechamento e PDF mensal, administração, troca de senha.
+- **Despesas (REAL)**, `/painel/despesas`, `docs/expenses.md` (`src/lib/api/expenses.ts`): a professora vê só
+  "Minhas despesas" (lista com status em português, formulário com anexo multipart, enviar, cancelar, motivo da
+  correção pedida); a gestão vê a fila de análise (filtro por situação na API) e age conforme a permissão da
+  sessão: aprovar (inclusive parcial, só quando um colaborador pagou, com motivo), recusar, pedir correção
+  (motivo), registrar reembolso ou pagamento. Não se oferece ao **autor** o que a API recusa (aprovar, recusar,
+  pedir correção, reembolsar, pagar a própria despesa); o servidor continua a autoridade (403, 404, 409, 422 em
+  português). A API devolve só o **id** de quem enviou, não o nome. Anexos: só PNG, JPEG, WebP e PDF até 10 MB; a
+  API não tem rota para remover anexo, então "trocar" é anexar o novo. O download passa pela API (cookie de
+  sessão), nunca URL pública.
+- **Fechamento mensal (REAL)**, `/painel/fechamento`, `docs/statement.md` (`src/lib/api/closings.ts`): lista com
+  estado (fechado ou reaberto), números congelados com os dois saldos, diferença para o banco e código de
+  verificação, "Fechar mês" (mês e saldo do banco em centavos; a API exige ordem e mostra o próximo mês),
+  "Verificar", "Baixar PDF do extrato mensal" (só de fechamento ativo; reaberto não tem PDF) e "Reabrir mês" só
+  para quem tem `months:reopen` (hoje o administrador da organização), com motivo de 10 a 500 caracteres. O
+  viewer só lê. O "PDF das contribuições do mês" segue no Resumo.
+- **Alterar senha (REAL)**, `/painel/conta`, `POST /auth/password`: 12 a 128 caracteres e diferente da atual; a
+  API encerra as outras sessões e abre uma nova neste navegador.
+- **Menu por perfil**, a partir de `active_membership.permissions` (`src/lib/permissions.ts`): professora =
+  "Minhas despesas"; tesoureira e direção = Resumo, Despesas e Fechamento; viewer = Resumo e Fechamento (leitura).
+  Os lançamentos por tipo (contribuições, despesas, reembolsos, devoluções) ficam em links dentro do Resumo.
+- **Simulado**: nada. Não há mais camada de mocks nem selo de protótipo. Ainda **sem tela**: administração
+  (escolas, categorias, convites de usuário).
 
 Usuários de demonstração (dados falsos) e a senha do seed ficam fora do repositório. Testes de unidade
 usam mocks; o e2e com login real lê a senha só em tempo de execução (`E2E_DEMO_PASSWORD_FILE`, veja
 `e2e/auth-helpers.ts`) e roda contra o `npm run dev` (3101), porque a API só aceita as origens acima.
 
-Rotas: `/` · `/escola/[slug]` · `/escola/[slug]/pedido/[token]` · `/login` · `/accept-invitation?token=…` · `/painel` (exige sessão).
+Rotas: `/` · `/escola/[slug]` · `/escola/[slug]/pedido/[token]` · `/login` · `/accept-invitation?token=…` · `/painel` (exige sessão) · `/painel/despesas` · `/painel/fechamento` · `/painel/conta`.
 Escolas de demonstração (banco local): `demo-aurora`, `demo-horizonte`, `demo-central`.
 
 ## Estrutura
 
 ```
 src/app/          rotas (App Router)
-src/components/   ui/, portal/, painel/, status/, login/, invitation/
-src/lib/          money (centavos + BRL), validation, status, color (contraste AA), api/ (health, auth, csrf, server), auth-messages, safe-next, roles, hooks/
+src/components/   ui/, portal/, painel/, despesas/, fechamento/, conta/, status/, login/, invitation/
+src/lib/          money (centavos + BRL), validation, status, color (contraste AA), api/ (health, auth, public, statement, expenses, closings, csrf, server), auth-messages, expense-labels, permissions, download, safe-next, roles, hooks/
 src/proxy.ts      CSP com nonce por requisição
 ```
 

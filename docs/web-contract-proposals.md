@@ -5,6 +5,10 @@
 > revisarem. O frontend não decide nada disto: se o Backend preferir outro desenho, só
 > `apps/web/src/lib/api/` muda.
 >
+> **Atualização (TASK-011, fatia 3):** despesas (`docs/expenses.md`), fechamento mensal com PDF
+> (`docs/statement.md`) e troca de senha (`docs/auth.md`) também são **reais** no site. Esta página é só
+> histórico.
+>
 > **Atualização (TASK-011, fatia 2):** o portal público (`/escola/{slug}`) e o painel (resumo, extrato,
 > pendências, contribuição em dinheiro, PDF) agora são **reais**: valem `docs/public-flow.md` e
 > `docs/statement.md`, e esta página é só histórico. Nada do site é simulado.
