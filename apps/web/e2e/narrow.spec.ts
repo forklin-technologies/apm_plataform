@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { demoPassword, loginAs } from "./auth-helpers";
+import { apiAcceptsThisOrigin, demoPassword, loginAs } from "./auth-helpers";
 
 /**
  * N5 e N4: telas estreitas (320 e 360 px) sem rolagem horizontal nem rotulo truncado, payload do Pix
@@ -8,14 +8,12 @@ import { demoPassword, loginAs } from "./auth-helpers";
  */
 const routes = [
   "/",
-  "/apm/escola-exemplo",
-  "/apm/escola-horizonte",
-  "/apm/emei-vale-verde",
-  "/apm/escola-exemplo/pedido/demo-comprovante-0001",
+  "/escola/demo-aurora",
+  "/escola/demo-horizonte",
   "/login",
   "/accept-invitation",
   "/accept-invitation?token=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG",
-  "/apm/nao-existe",
+  "/escola/nao-existe",
 ];
 
 // O painel exige sessao: estas rotas so rodam com a API real e a senha de demonstracao (e2e/auth-helpers.ts).
@@ -37,13 +35,12 @@ async function overflow(page: Page) {
   });
 }
 
+// Precisa da API real (o servidor busca a escola e o POST cria a contribuicao): E2E_BASE_URL=http://127.0.0.1:3101.
 async function reachPix(page: Page) {
-  await page.goto("/apm/escola-exemplo");
-  await page.getByText("Cota anual").first().click();
+  await page.goto("/escola/demo-aurora");
+  await page.getByRole("radio", { name: /20,00/ }).check({ force: true });
   await page.getByRole("button", { name: "Continuar" }).click();
-  await page.getByLabel("Nome do responsável").fill("Ana Paula Lima");
-  await page.getByLabel("Nome do aluno").fill("Davi Lima");
-  await page.getByRole("button", { name: "Continuar" }).click();
+  await page.getByRole("button", { name: "Continuar" }).click(); // dados opcionais em branco
   await page.getByRole("button", { name: /Gerar Pix/ }).click();
   await expect(page.getByRole("heading", { name: "Pague com Pix" })).toBeVisible();
 }
@@ -102,46 +99,28 @@ for (const width of [320, 360]) {
       expect(fit.cardRight).toBeLessThanOrEqual(fit.vw);
     });
 
-    test("payload do Pix: nenhuma palavra (PROTOTIPO, NAO, PIX, PAGUE, VALOR, CENTAVOS) e cortada ao meio", async ({ page }) => {
+    test("QR e payload do Pix cabem na tela: sem rolagem horizontal e sem linhas escondidas na caixa do codigo", async ({ page }) => {
+      test.skip(!apiAcceptsThisOrigin(), "precisa da API real (E2E_BASE_URL=http://127.0.0.1:3101)");
       await reachPix(page);
       const result = await page.evaluate(() => {
         const textarea = document.querySelector<HTMLTextAreaElement>("#pix-code")!;
-        const style = getComputedStyle(textarea);
-        const mirror = document.createElement("div");
-        const pad = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
-        Object.assign(mirror.style, {
-          position: "absolute", left: "-9999px", top: "0", boxSizing: "content-box", whiteSpace: "pre-wrap",
-          width: `${textarea.clientWidth - pad}px`, font: style.font, letterSpacing: style.letterSpacing,
-          lineHeight: style.lineHeight, overflowWrap: style.overflowWrap, wordBreak: style.wordBreak,
-        });
-        mirror.textContent = textarea.value;
-        document.body.appendChild(mirror);
-        const node = mirror.firstChild as Text;
-        const tops: number[] = [];
-        for (let i = 0; i < textarea.value.length; i += 1) {
-          const range = document.createRange();
-          range.setStart(node, i);
-          range.setEnd(node, i + 1);
-          tops.push(Math.round(range.getBoundingClientRect().top));
-        }
-        const cut: string[] = [];
-        for (const word of ["PROTOTIPO", "NAO", "PIX", "PAGUE", "VALOR", "CENTAVOS"]) {
-          for (let at = textarea.value.indexOf(word); at !== -1; at = textarea.value.indexOf(word, at + 1)) {
-            if (new Set(tops.slice(at, at + word.length)).size > 1) cut.push(`${word}@${at}`);
-          }
-        }
-        const lines = new Set(tops).size;
-        const lineHeight = parseFloat(style.lineHeight) || mirror.getBoundingClientRect().height / lines;
-        const textareaLines = Math.round((textarea.scrollHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom)) / lineHeight);
-        mirror.remove();
-        return { cut, lines, textareaLines, value: textarea.value, overflowX: textarea.scrollWidth - textarea.clientWidth, clippedY: textarea.scrollHeight - textarea.clientHeight };
+        const qr = document.querySelector("svg[role=img]")!.getBoundingClientRect();
+        return {
+          value: textarea.value,
+          overflowX: textarea.scrollWidth - textarea.clientWidth,
+          clippedY: textarea.scrollHeight - textarea.clientHeight,
+          qrRight: qr.right,
+          qrWidth: qr.width,
+          vw: document.documentElement.clientWidth,
+          pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        };
       });
-      expect(result.cut, `quebra no meio de palavra: ${result.value}`).toEqual([]);
+      expect(result.value).toMatch(/^PIX-SANDBOX:/);
       expect(result.overflowX).toBeLessThanOrEqual(0);
-      // nenhuma linha escondida: a caixa tem a altura de todo o texto (sem rolagem vertical interna)
       expect(result.clippedY, "linhas do payload escondidas na caixa").toBeLessThanOrEqual(1);
-      // o espelho reproduz a quebra real da textarea (sanidade da medicao)
-      expect(Math.abs(result.lines - result.textareaLines)).toBeLessThanOrEqual(1);
+      expect(result.qrRight).toBeLessThanOrEqual(result.vw);
+      expect(result.qrWidth, "QR pequeno demais para ler").toBeGreaterThanOrEqual(200);
+      expect(result.pageOverflow).toBeLessThanOrEqual(0);
     });
   });
 }
@@ -204,7 +183,7 @@ test.describe("N4: barra superior translucida", () => {
   for (const scheme of ["light", "dark"] as const) {
     test(`alpha de base >= 0,9 (${scheme}) no portal da escola e no painel`, async ({ page }) => {
       await page.emulateMedia({ colorScheme: scheme });
-      const routes = ["/apm/escola-exemplo"];
+      const routes = ["/escola/demo-aurora"];
       if (demoPassword()) {
         await loginAs(page);
         routes.push("/painel");

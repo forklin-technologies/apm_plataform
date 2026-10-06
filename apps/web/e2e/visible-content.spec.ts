@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { ANA, demoPassword, loginAs } from "./auth-helpers";
+import { ANA, apiAcceptsThisOrigin, demoPassword, loginAs } from "./auth-helpers";
 import {
   applyScenario,
   cspViolations,
@@ -50,7 +50,7 @@ for (const scenario of scenarios) {
         ["/login", "login"],
         ["/accept-invitation", "convite sem token"],
         ["/accept-invitation?token=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG", "convite"],
-        ["/apm/nao-existe", "404 da escola"],
+        ["/escola/nao-existe", "404 da escola"],
         ["/pagina-que-nao-existe", "404 geral"],
       ] as const) {
         await page.goto(path);
@@ -58,8 +58,9 @@ for (const scenario of scenarios) {
       }
     });
 
-    test("portal: os 4 passos, o Pix, a confirmacao e o comprovante", async ({ page }) => {
-      await page.goto("/apm/escola-exemplo");
+    test("portal (API real): os passos, o QR, a confirmacao e o comprovante", async ({ page }) => {
+      test.skip(!apiAcceptsThisOrigin(), "precisa da API real (E2E_BASE_URL=http://127.0.0.1:3101)");
+      await page.goto("/escola/demo-aurora");
       await expect(page.getByRole("heading", { name: "Quanto você quer contribuir?" })).toBeVisible();
       await expectVisible(page, "passo 1 (valor)", scenario);
 
@@ -73,10 +74,11 @@ for (const scenario of scenarios) {
 
       await expect(page.getByRole("heading", { name: "Quem está contribuindo?" })).toBeVisible();
       await expectVisible(page, "passo 2 (dados)", scenario);
+      await page.getByLabel(/E-mail/).fill("sem-arroba");
       await page.getByRole("button", { name: "Continuar" }).click();
-      await expectVisible(page, "passo 2 com erros", scenario);
-      await page.getByLabel("Nome do responsável").fill("Ana Paula Lima");
-      await page.getByLabel("Nome do aluno").fill("Davi Lima");
+      await expectVisible(page, "passo 2 com erro", scenario);
+      await page.getByLabel(/E-mail/).fill("");
+      await page.getByLabel(/Nome do responsável/).fill("Ana Paula Lima");
       await page.getByRole("button", { name: "Continuar" }).click();
 
       await expect(page.getByRole("heading", { name: "Confira antes de pagar" })).toBeVisible();
@@ -86,7 +88,7 @@ for (const scenario of scenarios) {
       await expect(page.getByRole("heading", { name: "Pague com Pix" })).toBeVisible();
       await expectVisible(page, "passo 4 (Pix)", scenario);
 
-      // o mock devolve PAID depois de ~8 s; documento oculto pode atrasar os timers
+      await page.getByRole("button", { name: "Simular pagamento (somente desenvolvimento)" }).click();
       await expect(page.getByRole("heading", { name: "Pagamento confirmado" })).toBeVisible({ timeout: 40_000 });
       await expectVisible(page, "pagamento confirmado", scenario);
       // N6: o carimbo SVG (anel e check) tambem precisa estar visivel, mesmo congelado em t=0
@@ -97,11 +99,11 @@ for (const scenario of scenarios) {
       await expectVisible(page, "comprovante", scenario);
     });
 
-    test("portal: outras escolas e comprovante de exemplo", async ({ page }) => {
+    test("portal (API real): outras escolas", async ({ page }) => {
+      test.skip(!apiAcceptsThisOrigin(), "precisa da API real (E2E_BASE_URL=http://127.0.0.1:3101)");
       for (const [path, label] of [
-        ["/apm/escola-horizonte", "escola Horizonte"],
-        ["/apm/emei-vale-verde", "EMEI Vale Verde"],
-        ["/apm/escola-exemplo/pedido/demo-comprovante-0001", "comprovante de exemplo"],
+        ["/escola/demo-horizonte", "escola Horizonte"],
+        ["/escola/demo-central", "escola Central"],
       ] as const) {
         await page.goto(path);
         await expectVisible(page, label, scenario);

@@ -18,7 +18,7 @@ test("N3b: /apix, /api-docs e /apiary NAO ficam de fora do proxy: recebem a CSP 
 });
 
 test("as paginas normais continuam com a CSP e os cabecalhos estaticos", async ({ request }) => {
-  for (const path of ["/", "/login", "/painel", "/apm/escola-exemplo"]) {
+  for (const path of ["/", "/login", "/painel", "/escola/demo-aurora"]) {
     const headers = (await request.get(path)).headers();
     expect(headers["content-security-policy"], path).toContain("object-src 'none'");
     expect(headers["x-content-type-options"], path).toBe("nosniff");

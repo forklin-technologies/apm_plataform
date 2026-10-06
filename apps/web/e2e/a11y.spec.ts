@@ -5,12 +5,11 @@ import { demoPassword, loginAs } from "./auth-helpers";
 const INVITE = "/accept-invitation?token=abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG";
 const routes = [
   "/",
-  "/apm/escola-exemplo",
-  "/apm/escola-exemplo/pedido/demo-comprovante-0001",
+  "/escola/demo-aurora",
   "/login",
   "/accept-invitation",
   INVITE,
-  "/apm/nao-existe",
+  "/escola/nao-existe",
 ];
 
 async function axe(page: Page) {
