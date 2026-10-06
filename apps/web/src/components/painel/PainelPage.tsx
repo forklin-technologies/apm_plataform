@@ -25,7 +25,7 @@ export async function PainelPage({ area, tipo, mes, aba }: Props) {
   const active = auth.session.activeMembership;
   if (active) {
     const areas = areasFor(active.permissions);
-    const allowed = area === "resumo" ? areas.resumo : area === "fechamento" ? areas.fechamento : areas.manageExpenses || areas.myExpenses;
+    const allowed = area === "conta" || (area === "resumo" ? areas.resumo : area === "fechamento" ? areas.fechamento : areas.manageExpenses || areas.myExpenses);
     const home = homeArea(areas);
     if (!allowed && home !== area) redirect(areaHref(home));
   }

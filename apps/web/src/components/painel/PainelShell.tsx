@@ -10,10 +10,11 @@ import { api } from "@/lib/api";
 import type { Session } from "@/lib/api/types";
 import { describeAuthError, isSessionLost } from "@/lib/auth-messages";
 import { sectionHref, type PainelSection } from "@/lib/painel-section";
-import { areasFor, type PainelArea } from "@/lib/permissions";
+import { areaHref, areasFor, type PainelArea } from "@/lib/permissions";
 import { ROLE_LABELS, membershipTitle } from "@/lib/roles";
 import { ContextChooser } from "./ContextChooser";
 import { ExpensesArea } from "@/components/despesas/ExpensesArea";
+import { PasswordForm } from "@/components/conta/PasswordForm";
 import { ClosingsArea } from "@/components/fechamento/ClosingsArea";
 import { KIND_META } from "./kinds";
 import { navFor } from "./nav";
@@ -86,7 +87,9 @@ export function PainelShell({ session, area = "resumo", section = "resumo", tab 
   const areas = areasFor(active.permissions);
   const navItems = navFor(areas, period);
   const title =
-    area === "despesas"
+    area === "conta"
+      ? "Alterar senha"
+      : area === "despesas"
       ? areas.manageExpenses
         ? "Despesas"
         : "Minhas despesas"
@@ -146,6 +149,9 @@ export function PainelShell({ session, area = "resumo", section = "resumo", tab 
             <p className="truncate text-sub font-semibold text-ink">{session.user.fullName}</p>
             <p className="truncate text-foot text-ink-2">{ROLE_LABELS[active.role]}</p>
           </div>
+          <Link href={areaHref("conta")} aria-current={area === "conta" ? "page" : undefined} className="inline-flex min-h-11 items-center text-sub font-semibold text-ink underline underline-offset-2">
+            Alterar senha
+          </Link>
           {signOutButton}
           <ApiStatusChip />
         </div>
@@ -167,7 +173,12 @@ export function PainelShell({ session, area = "resumo", section = "resumo", tab 
               <p className="mt-1 text-body text-ink-2">
                 {contextName} · {ROLE_LABELS[active.role]}
               </p>
-              <p className="mt-0.5 text-foot text-ink-2 lg:hidden">Conectado como {session.user.fullName}</p>
+              <p className="mt-0.5 text-foot text-ink-2 lg:hidden">
+                Conectado como {session.user.fullName} ·{" "}
+                <Link href={areaHref("conta")} className="font-semibold text-ink underline underline-offset-2">
+                  Alterar senha
+                </Link>
+              </p>
             </div>
           </div>
 
@@ -177,7 +188,9 @@ export function PainelShell({ session, area = "resumo", section = "resumo", tab 
             </p>
           )}
 
-          {schoolId && area === "despesas" ? (
+          {area === "conta" ? (
+            <PasswordForm />
+          ) : schoolId && area === "despesas" ? (
             <ExpensesArea key={schoolId} schoolId={schoolId} userId={session.user.id} permissions={active.permissions} tab={tab} />
           ) : schoolId && area === "fechamento" ? (
             <ClosingsArea key={schoolId} schoolId={schoolId} permissions={active.permissions} />

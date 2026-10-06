@@ -29,7 +29,7 @@ export function areasFor(permissions: readonly string[]): Areas {
   };
 }
 
-export type PainelArea = "resumo" | "despesas" | "fechamento";
+export type PainelArea = "resumo" | "despesas" | "fechamento" | "conta";
 
 export function areaHref(area: PainelArea, params: { period?: string; tab?: "minhas" } = {}): string {
   const base = area === "resumo" ? "/painel" : `/painel/${area}`;
