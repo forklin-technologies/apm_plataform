@@ -565,6 +565,13 @@ DEFINER_COLUMNS = {
         "transaction_id", "organization_id", "school_id", "receipt_token_hash",
         "receipt_expires_at",
     },
+    # 0009 (ADR-019): what the expiry job's function reads to say where to look
+    ("pix_charges", "SELECT"): {
+        "transaction_id", "organization_id", "school_id", "status", "expires_at",
+    },
+    ("financial_transactions", "SELECT"): {
+        "id", "organization_id", "school_id", "kind", "status", "created_at",
+    },
 }  # fmt: skip
 
 

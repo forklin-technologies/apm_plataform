@@ -83,9 +83,17 @@ EXPECTED_POLICIES: frozenset[tuple[str, str, str, str]] = frozenset(
         ("school_settings", "school_settings_definer_select", "SELECT", "apm_definer"),
         ("payment_accounts", "payment_accounts_definer_select", "SELECT", "apm_definer"),
         ("contributions", "contributions_definer_select", "SELECT", "apm_definer"),
+        # 0009 (ADR-019): the expiry job finds the schools with work to do.
+        ("pix_charges", "pix_charges_definer_stale_select", "SELECT", "apm_definer"),
+        (
+            "financial_transactions",
+            "financial_transactions_definer_stale_select",
+            "SELECT",
+            "apm_definer",
+        ),
         # 0007: a SELECT and an INSERT policy on each financial table, and an UPDATE one on every
         # table but the two that only grow (expense_attachments, audit_logs): 37. None of them is
-        # open to apm_definer: the financial schema has no SECURITY DEFINER function.
+        # open to apm_definer (the two SELECT policies of 0009 above are the only ones).
         *(
             (table, f"{table}_{command.lower()}", command, "public")
             for table in FINANCIAL_TABLES
@@ -99,8 +107,8 @@ EXPECTED_POLICIES: frozenset[tuple[str, str, str, str]] = frozenset(
 )
 
 # The SECURITY DEFINER functions that may exist, as `schema.name(argument types)`. The list is
-# closed on purpose: the three of TASK-004 (ADR-016) and the three of the public flow (0008,
-# ADR-018); a later task adds its own by an ADR.
+# closed on purpose: the three of TASK-004 (ADR-016), the three of the public flow (0008,
+# ADR-018) and the one of the expiry job (0009, ADR-019); a later task adds its own by an ADR.
 ALLOWED_SECURITY_DEFINER: frozenset[str] = frozenset(
     {
         "public.find_login_identity(p_email text)",
@@ -110,6 +118,7 @@ ALLOWED_SECURITY_DEFINER: frozenset[str] = frozenset(
         "public.resolve_school_public(p_slug text)",
         "public.resolve_webhook_target(p_provider text, p_secret_hash text)",
         "public.resolve_receipt(p_token_hash text)",
+        "public.find_schools_with_stale_contributions(p_after uuid, p_limit integer)",
     }
 )
 

@@ -82,6 +82,22 @@ services:
       retries: 10
       start_period: 5s
 
+  # The expiry job (TASK-008, ADR-019): every minute it expires the Pix charges and the contributions
+  # nobody paid. Same image and same database identity as the API (apm_app); no credential of its
+  # own, no published port. Logs one line only when it did something or something failed.
+  jobs:
+    build: *api-build
+    environment:
+      ENV: ${ENV:-development}
+      DATABASE_URL: postgresql+psycopg://apm_app:${APP_DB_PASSWORD:?copy .env.example to .env}@db:5432/${POSTGRES_DB:?copy .env.example to .env}
+    command: ["python", "-m", "app.jobs.expire", "--loop", "--interval", "60"]
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
   # A second, throwaway Postgres cluster: no published port, data in memory, not started by `up`.
   # Only the tests use it, for what cannot be checked in the main cluster: running the migrations
   # as a CREATEROLE admin that is NOT a superuser (the managed-service case) in a cluster where the

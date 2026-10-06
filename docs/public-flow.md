@@ -38,7 +38,11 @@ receive the token. The site must make it with `crypto.randomUUID()` for each att
 over HTTPS, and the proxy must not log request headers.
 
 A charge is marked `EXPIRED` only 2 minutes after its `expires_at` (EXPIRED is final, and a payment
-the provider confirms at the edge must still find it `PENDING`). A webhook event the provider could
+the provider confirms at the edge must still find it `PENDING`). A contribution is marked `EXPIRED`
+24 hours after it was created, and only when no charge is waiting for a payment: until then the
+family can ask for a new charge. Both rules live in `app/contributions/expiry.py` and are applied
+twice: lazily, when a family polls the page (so the page never shows a stale state), and by the job
+(see below). A webhook event the provider could
 not confirm yet stays open (`processed_at` empty), so a retry with the same event id can settle it.
 The cash route also accepts an optional `Idempotency-Key`: a retry answers `200` with the
 contribution already recorded. The sandbox never serves production (`501` for a charge, `404` for
@@ -70,6 +74,29 @@ charges). With the stack running (`docker compose up -d --wait`):
 
 ## Not here yet
 
-The real provider (Banco do Brasil, mTLS, the credentials behind `secret_ref`), the job that expires
-old contributions (the API already marks an expired charge when it is read), and the screens: the
-site still uses its prototype data for this flow.
+The real provider (Banco do Brasil, mTLS, the credentials behind `secret_ref`) and the
+reconciliation of webhooks that never arrived (asking the provider about charges that stayed
+`PENDING`): both are M1.5/M2.
+
+## The expiry job (TASK-008, ADR-019)
+
+`python -m app.jobs.expire` expires everything that is due, in every school, and exits;
+`--loop --interval 60` repeats until SIGTERM. The `jobs` service of `docker-compose.yml` runs it every
+minute with the same image and the same database identity as the API (`apm_app`): it has no
+credential of its own.
+
+It has no school in hand, so it asks the database WHERE to look: `find_schools_with_stale_contributions`
+(0009) returns only `(organization_id, school_id)` of the schools with a charge past its grace or a
+contribution past 24 hours with no live charge, and nothing else. The writing never goes through that
+function: for each school the job opens a session of its own, binds the school and acts as the
+`SYSTEM` under row level security, so the triggers, the state machine and the audit are the ones of any
+request (`audit_logs.actor_type = 'SYSTEM'`). A school that fails is logged (its id and the kind of
+error, never a value) and does not stop the others; the exit code is 1 if any failed.
+
+A contribution is locked (`FOR UPDATE`) and its conditions are read again before it is expired: a
+family renewing the charge holds that lock while it inserts the new `PENDING` charge, and a single
+`UPDATE ... WHERE NOT EXISTS` would not see a charge committed while it waited. The test
+`test_a_renewal_that_commits_while_the_job_waits_keeps_the_contribution` fails without the lock.
+
+A payment the provider confirms after a charge or a contribution expired cannot be applied (EXPIRED
+never changes): the webhook answers `IGNORED`. Refunding it is part of the refund flow (M1.5).

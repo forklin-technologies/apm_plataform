@@ -190,14 +190,16 @@ EXPECTED_FUNCTIONS = {
     # tenancy and authentication (0003 to 0006): the context functions and the closed list of ADR-016
     "app_session_id", "app_user_id", "accept_invitation", "find_login_identity",
     "list_memberships_for_user",
-    # the public flow (0008, ADR-018)
+    # the public flow (0008, ADR-018) and the expiry job (0009, ADR-019)
     "resolve_school_public", "resolve_webhook_target", "resolve_receipt",
+    "find_schools_with_stale_contributions",
 }  # fmt: skip
-# The only SECURITY DEFINER functions of the schema (ADR-016, owned by apm_definer; the financial
+# The only SECURITY DEFINER functions of the schema (ADR-016, 018 and 019, owned by apm_definer; the financial
 # schema has none). tests/test_app_role.py asserts their owner, search_path and who may execute them.
 DEFINER_FUNCTIONS = {
     "accept_invitation", "find_login_identity", "list_memberships_for_user",
     "resolve_school_public", "resolve_webhook_target", "resolve_receipt",
+    "find_schools_with_stale_contributions",
 }  # fmt: skip
 
 
@@ -286,7 +288,7 @@ def test_no_security_definer_function_exists_anywhere(admin_engine: Engine) -> N
         ).all()
     assert sorted(row[0] for row in definers) == sorted(
         f"public.{name}" for name in DEFINER_FUNCTIONS
-    )  # the closed list of ADR-016, nothing else
+    )  # the closed list (ADR-016, 018, 019), nothing else
 
 
 # --- rules --------------------------------------------------------------------------------------

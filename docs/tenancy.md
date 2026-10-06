@@ -28,7 +28,7 @@ public.app_org()     -- nullif(current_setting('app.organization_id', true), '')
 public.app_school()  -- nullif(current_setting('app.school_id', true), '')::uuid
 ```
 
-Both are `STABLE`, `SECURITY INVOKER`, with a fixed `search_path = pg_catalog`, owned by `apm_owner`. **`SECURITY DEFINER` functions exist only on a closed list**: none among the context functions, and the three of migration 0006, owned by `apm_definer` (see [auth.md](auth.md)). A test enumerates every function and fails on any other.
+Both are `STABLE`, `SECURITY INVOKER`, with a fixed `search_path = pg_catalog`, owned by `apm_owner`. **`SECURITY DEFINER` functions exist only on a closed list**: none among the context functions, the three of migration 0006 (see [auth.md](auth.md)), the three of 0008 and the one of 0009 (see [financial-model.md](financial-model.md)), all owned by `apm_definer`. A test enumerates every function and fails on any other.
 
 Context semantics: `(organization, None)` is an organization-wide context (every school of it); `(organization, school)` is "working inside that school" (only that school's rows).
 

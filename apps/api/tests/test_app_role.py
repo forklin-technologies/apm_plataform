@@ -212,6 +212,7 @@ FUNCTIONS = {
             "resolve_school_public(text)",
             "resolve_webhook_target(text,text)",
             "resolve_receipt(text)",
+            "find_schools_with_stale_contributions(uuid,integer)",
         )
     },
     **{
@@ -286,6 +287,9 @@ DEFINER_POLICIES = {
     "school_settings.school_settings_definer_select",
     "payment_accounts.payment_accounts_definer_select",
     "contributions.contributions_definer_select",
+    # 0009 (ADR-019): the function the expiry job asks where to look
+    "pix_charges.pix_charges_definer_stale_select",
+    "financial_transactions.financial_transactions_definer_stale_select",
     "users.users_definer_insert",
     "users.users_definer_select",
 }
@@ -423,7 +427,8 @@ def test_there_is_no_system_mode_and_the_open_policies_are_the_closed_list_of_ap
         ).all()
 
     # 30 of TASK-003 and 0006 + 37 of the financial schema (0007) + 4 of the public flow (0008)
-    assert len(policies) == 30 + 37 + 4
+    # + 2 of the expiry job (0009)
+    assert len(policies) == 30 + 37 + 4 + 2
     open_ones = set()
     for name, qual, check, roles in policies:
         if qual.strip().lower() == "true" or check.strip().lower() == "true":

@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.auth.ratelimit import AttemptKeys, attempt_keys, blocked_for, record_attempt
 from app.auth.tokens import b64url, keyed_digest, looks_like_a_token
+from app.contributions.expiry import expire_charges, expire_contribution
 from app.core.config import ApiSettings
 from app.core.errors import ProblemError
 from app.pix.provider import ChargeTarget, get_provider
@@ -33,9 +34,6 @@ FIELD_NAMES = (
     "contributor_phone",
 )
 RECEIPT_DAYS = 30
-# A charge is marked EXPIRED only this long after its expiry: a payment confirmed right at the edge
-# (clock skew with the provider) must still find a PENDING charge, because EXPIRED is final.
-EXPIRY_GRACE_SECONDS = 120
 CREATIONS_PER_WINDOW = 30  # new contributions per client address
 CREATION_WINDOW_SECONDS = 15 * 60
 
@@ -223,19 +221,9 @@ def clean_input(school: PublicSchool, data: ContributionIn) -> dict[str, str]:
 # --- reading and writing as apm_app, inside the school -------------------------------------------
 
 
-def _expire_old_charges(db: Session, transaction_id: uuid.UUID) -> None:
-    db.execute(
-        text(
-            "UPDATE pix_charges SET status = 'EXPIRED', updated_at = now() "
-            "WHERE transaction_id = :tx AND status = 'PENDING' "
-            "AND expires_at + make_interval(secs => :grace) <= now()"
-        ),
-        {"tx": transaction_id, "grace": EXPIRY_GRACE_SECONDS},
-    )
-
-
 def read_state(db: Session, transaction_id: uuid.UUID) -> ContributionState:
-    _expire_old_charges(db, transaction_id)
+    expire_charges(db, transaction_id=transaction_id)
+    expire_contribution(db, transaction_id)
     contribution = db.execute(
         text("SELECT status, amount_cents FROM financial_transactions WHERE id = :tx"),
         {"tx": transaction_id},

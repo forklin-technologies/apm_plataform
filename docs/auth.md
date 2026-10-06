@@ -125,7 +125,7 @@ The IP is `request.client`. uvicorn replaces it with `X-Forwarded-For` **only** 
 
 ## The `SECURITY DEFINER` functions
 
-ADR-016 allows reading **without a tenant context** only through a **closed list** of narrow functions. This task owns three; the others in the ADR (public school, webhook target, receipt) belong to the financial tasks. A test enumerates every function in the schema (signature, owner, `prosecdef`, `proconfig`, ACL) and every permissive policy, and fails on anything not on the list: a new function needs a new ADR.
+ADR-016 allows reading **without a tenant context** only through a **closed list** of narrow functions. This task owns three; the others in the ADR (public school, webhook target, receipt) are in migration 0008 and the expiry job's in 0009 (see [financial-model.md](financial-model.md)). A test enumerates every function in the schema (signature, owner, `prosecdef`, `proconfig`, ACL) and every permissive policy, and fails on anything not on the list: a new function needs a new ADR.
 
 Common to all three: owner `apm_definer`; `SECURITY DEFINER`; `search_path = pg_catalog`; static SQL with every object qualified (`public.users`); `REVOKE ALL FROM PUBLIC`; `EXECUTE` only for `apm_app`; the arguments are data, never SQL.
 

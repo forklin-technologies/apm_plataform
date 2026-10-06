@@ -224,6 +224,12 @@ def test_log_messages_of_the_auth_code_are_constants_or_carry_only_an_id_and_a_c
     argument, so the call sites are looked at one by one."""
     allowed_extra = {  # (file, first-argument text) -> why an argument is acceptable
         ("app/core/errors.py", "unhandled error on request %s: %s"): "request id and class name",
+        ("app/jobs/expire.py", "school %s: expiry failed (%s)"): "school id and class name",
+        ("app/jobs/expire.py", "pass failed (%s)"): "class name",
+        (
+            "app/jobs/expire.py",
+            "schools=%d charges_expired=%d contributions_expired=%d failed=%d",
+        ): "counts",
     }
     found: list[tuple[str, str, int]] = []
     for path in _python_files():
