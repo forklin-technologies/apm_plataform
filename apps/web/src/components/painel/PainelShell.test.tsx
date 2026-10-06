@@ -9,6 +9,7 @@ import { SCHOOL_MEMBERSHIP, sessionBody } from "@/test-utils/auth-fixtures";
 const router = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
 vi.mock("@/components/status/ApiStatusChip", () => ({ ApiStatusChip: () => null }));
+vi.mock("@/components/despesas/ExpensesArea", () => ({ ExpensesArea: () => <div data-testid="expenses-area" /> }));
 vi.mock("./PainelData", () => ({
   PainelData: (p: { schoolId: string; section: string; period?: string; permissions: string[] }) => (
     <div data-testid="data">{`${p.schoolId}|${p.section}|${p.period ?? ""}|${p.permissions.join(",")}`}</div>
@@ -23,8 +24,8 @@ const problem = (code: string, status: number): ApiResult<never> => ({
   error: { kind: "problem", status, code } as ApiError,
 });
 
-function renderShell(s: Session = session(), props: { section?: "resumo" | "EXPENSE"; period?: string } = {}) {
-  return render(<PainelShell session={s} section={props.section ?? "resumo"} period={props.period} />);
+function renderShell(s: Session = session(), props: { area?: "resumo" | "despesas" | "fechamento"; period?: string } = {}) {
+  return render(<PainelShell session={s} area={props.area ?? "resumo"} period={props.period} />);
 }
 
 beforeEach(() => {
@@ -53,19 +54,33 @@ describe("PainelShell com sessao real", () => {
     expect(screen.getByTestId("data")).toHaveTextContent(`${SCHOOL_MEMBERSHIP.school.id}|resumo|2026-09|statement:read,reports:read`);
   });
 
-  it("sem statement:read o menu so tem o Resumo (a rota de lancamentos nao e oferecida)", () => {
-    const viewer = session({ active_membership: { ...SCHOOL_MEMBERSHIP, role: "viewer", permissions: ["reports:read_aggregate"] } });
-    const { unmount } = renderShell(viewer);
-    expect(screen.getAllByRole("link", { name: "Resumo" }).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("link", { name: "Contribuições" })).not.toBeInTheDocument();
+  it("o menu muda por perfil, a partir das permissoes da sessao", () => {
+    const names = () => screen.getAllByRole("link").map((l) => l.textContent);
+    const staff = session({ active_membership: { ...SCHOOL_MEMBERSHIP, role: "staff", permissions: ["expenses:read_own", "expenses:submit"] } });
+    const { unmount } = renderShell(staff, { area: "despesas" });
+    expect(screen.getAllByRole("link", { name: "Minhas despesas" }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("link", { name: "Resumo" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Fechamento" })).not.toBeInTheDocument();
     unmount();
-    renderShell(session({ active_membership: { ...SCHOOL_MEMBERSHIP, permissions: ["statement:read"] } }));
-    expect(screen.getAllByRole("link", { name: "Contribuições" }).length).toBeGreaterThan(0);
+
+    const treasurer = session({ active_membership: { ...SCHOOL_MEMBERSHIP, permissions: ["statement:read", "expenses:approve", "expenses:read_all", "months:close"] } });
+    const t = renderShell(treasurer);
+    expect(names()).toEqual(expect.arrayContaining(["Resumo", "Despesas", "Fechamento"]));
+    expect(screen.queryByRole("link", { name: "Minhas despesas" })).not.toBeInTheDocument();
+    t.unmount();
+
+    const viewer = session({ active_membership: { ...SCHOOL_MEMBERSHIP, role: "viewer", permissions: ["reports:read_aggregate"] } });
+    renderShell(viewer);
+    expect(names()).toEqual(expect.arrayContaining(["Resumo", "Fechamento"]));
+    expect(screen.queryByRole("link", { name: "Despesas" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Contribuições" })).not.toBeInTheDocument();
   });
 
-  it("os links do menu carregam o mes escolhido", () => {
-    renderShell(session({ active_membership: { ...SCHOOL_MEMBERSHIP, permissions: ["statement:read"] } }), { period: "2026-09" });
-    expect(screen.getAllByRole("link", { name: "Despesas" })[0]).toHaveAttribute("href", "/painel?tipo=despesas&mes=2026-09");
+  it("os links do menu carregam o mes escolhido (resumo e fechamento)", () => {
+    renderShell(session({ active_membership: { ...SCHOOL_MEMBERSHIP, permissions: ["statement:read", "expenses:read_all"] } }), { period: "2026-09" });
+    expect(screen.getAllByRole("link", { name: "Resumo" })[0]).toHaveAttribute("href", "/painel?mes=2026-09");
+    expect(screen.getAllByRole("link", { name: "Fechamento" })[0]).toHaveAttribute("href", "/painel/fechamento?mes=2026-09");
+    expect(screen.getAllByRole("link", { name: "Despesas" })[0]).toHaveAttribute("href", "/painel/despesas");
   });
 
   it("o seletor lista os vinculos reais agrupados e troca de contexto pelo id do vinculo", async () => {

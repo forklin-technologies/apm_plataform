@@ -10,22 +10,29 @@ import { api } from "@/lib/api";
 import type { Session } from "@/lib/api/types";
 import { describeAuthError, isSessionLost } from "@/lib/auth-messages";
 import { sectionHref, type PainelSection } from "@/lib/painel-section";
+import { areasFor, type PainelArea } from "@/lib/permissions";
 import { ROLE_LABELS, membershipTitle } from "@/lib/roles";
 import { ContextChooser } from "./ContextChooser";
+import { ExpensesArea } from "@/components/despesas/ExpensesArea";
 import { KIND_META } from "./kinds";
-import { NAV_ITEMS } from "./nav";
+import { navFor } from "./nav";
 import { PainelData } from "./PainelData";
 import { TenantSwitcher } from "./TenantSwitcher";
 
 interface PainelShellProps {
   /** REAL: quem esta logado e onde atua (GET /auth/me, lido no servidor). */
   session: Session;
-  section: PainelSection;
+  /** Area do menu: resumo (padrao), despesas ou fechamento. */
+  area?: PainelArea;
+  /** Dentro do resumo: os lancamentos por tipo (?tipo=). */
+  section?: PainelSection;
+  /** Quem tem as duas funcoes de despesa escolhe a aba (?aba=minhas). */
+  tab?: "minhas" | "fila";
   /** YYYY-MM da URL (?mes=); sem ele a API usa o mes corrente no fuso da escola. */
   period?: string;
 }
 
-export function PainelShell({ session, section, period }: PainelShellProps) {
+export function PainelShell({ session, area = "resumo", section = "resumo", tab = "fila", period }: PainelShellProps) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
@@ -75,11 +82,20 @@ export function PainelShell({ session, section, period }: PainelShellProps) {
   }
 
   const contextName = membershipTitle(active);
-  const title = section === "resumo" ? "Resumo" : KIND_META[section].plural;
+  const areas = areasFor(active.permissions);
+  const navItems = navFor(areas, period);
+  const title =
+    area === "despesas"
+      ? areas.manageExpenses
+        ? "Despesas"
+        : "Minhas despesas"
+      : area === "fechamento"
+        ? "Fechamento"
+        : section === "resumo"
+          ? "Resumo"
+          : KIND_META[section].plural;
   // O painel e da ESCOLA do vinculo ativo. O id vem da sessao; a API ainda confere contra o contexto.
   const schoolId = active.school?.id ?? null;
-  const canReadStatement = active.permissions.includes("statement:read");
-  const navItems = NAV_ITEMS.filter((item) => item.section === "resumo" || canReadStatement);
 
   const switcher = (compact: boolean) => (
     <TenantSwitcher
@@ -108,11 +124,11 @@ export function PainelShell({ session, section, period }: PainelShellProps) {
         <nav aria-label="Seções do painel">
           <ul className="space-y-1">
             {navItems.map((item) => {
-              const current = item.section === section;
+              const current = item.area === area;
               return (
-                <li key={item.section}>
+                <li key={item.area}>
                   <Link
-                    href={sectionHref(item.section, period)}
+                    href={item.href}
                     aria-current={current ? "page" : undefined}
                     className={`flex min-h-11 items-center gap-3 rounded-[12px] px-3 text-body font-medium transition-colors ${current ? "bg-ink text-bg" : "text-ink hover:bg-neutral-soft"}`}
                   >
@@ -160,7 +176,9 @@ export function PainelShell({ session, section, period }: PainelShellProps) {
             </p>
           )}
 
-          {schoolId ? (
+          {schoolId && area === "despesas" ? (
+            <ExpensesArea key={schoolId} schoolId={schoolId} userId={session.user.id} permissions={active.permissions} tab={tab} />
+          ) : schoolId ? (
             <PainelData
               // Trocar de vinculo troca de escola: o estado dos numeros recomeca do zero.
               key={schoolId}
@@ -191,11 +209,11 @@ export function PainelShell({ session, section, period }: PainelShellProps) {
             rotulo (nem o mais longo) e truncado de 320px para cima. */}
         <ul className="mx-auto flex max-w-xl">
           {navItems.map((item) => {
-            const current = item.section === section;
+            const current = item.area === area;
             return (
-              <li key={item.section} className="flex-auto">
+              <li key={item.area} className="flex-auto">
                 <Link
-                  href={sectionHref(item.section, period)}
+                  href={item.href}
                   aria-current={current ? "page" : undefined}
                   className={`flex min-h-[3.5rem] flex-col items-center justify-center gap-0.5 px-0.5 text-tab font-medium max-[339px]:text-[0.625rem] ${current ? "text-ink" : "text-ink-2"}`}
                 >

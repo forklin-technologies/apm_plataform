@@ -1,12 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/Button";
 import { api } from "@/lib/api";
 import { contributionsPdfHref } from "@/lib/api/statement";
 import type { ApiError, ApiResult, Page, PendingEntry, StatementEntry, StatementSummary } from "@/lib/api/types";
 import { describeAuthError } from "@/lib/auth-messages";
-import type { PainelSection } from "@/lib/painel-section";
+import { sectionHref, type PainelSection } from "@/lib/painel-section";
 import { KIND_LABELS, type MovementKind } from "@/lib/status";
 import { PENDING_SECTIONS, periodLabel, pendingSectionTitle, recentPeriods, currentLocalPeriod } from "@/lib/statement-labels";
 import { CashContributionForm } from "./CashContributionForm";
@@ -214,6 +215,22 @@ export function PainelData({ schoolId, section, period, permissions, onPeriodCha
             </Notice>
           )}
 
+          {canReadStatement && (
+            <nav aria-label="Lançamentos do mês">
+              <h2 className="text-heading text-ink">Lançamentos do mês</h2>
+              <p className="mb-3 mt-1 max-w-[60ch] text-body text-ink-2">O extrato do caixa, um tipo de cada vez.</p>
+              <ul className="flex flex-wrap gap-2">
+                {(["CONTRIBUTION", "EXPENSE", "REIMBURSEMENT", "REFUND"] as const).map((k) => (
+                  <li key={k}>
+                    <Link href={sectionHref(k, period)} className="inline-flex min-h-11 items-center gap-2 rounded-full bg-neutral-soft px-4 text-sub font-semibold text-ink hover:brightness-[0.97]">
+                      {KIND_META[k].plural}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          )}
+
           {canReadStatement && <PendingBlock pending={pending} />}
         </div>
       )}
@@ -224,6 +241,9 @@ export function PainelData({ schoolId, section, period, permissions, onPeriodCha
             {KIND_META[kind].plural}
             {effectivePeriod ? ` de ${periodLabel(effectivePeriod)}` : ""}
           </h2>
+          <Link href={sectionHref("resumo", period)} className="mb-3 inline-flex min-h-11 items-center text-sub font-semibold text-accent-ink underline underline-offset-2">
+            Voltar ao resumo
+          </Link>
           <p className="mb-4 max-w-[60ch] text-body text-ink-2">{KIND_META[kind].definition}</p>
           {!canReadStatement && <Notice tone="info">O seu perfil não vê os lançamentos desta escola.</Notice>}
           {canReadStatement && entries.state === "loading" && <Skeleton label="Carregando os lançamentos…" />}

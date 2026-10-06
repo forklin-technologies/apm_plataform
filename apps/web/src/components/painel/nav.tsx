@@ -1,21 +1,29 @@
 import type { ReactNode } from "react";
-import { GridIcon } from "@/components/ui/icons";
-import { sectionHref, type PainelSection } from "@/lib/painel-section";
-import { KIND_META } from "./kinds";
+import { GridIcon, ReceiptIcon, ReportIcon } from "@/components/ui/icons";
+import { areaHref, type Areas, type PainelArea } from "@/lib/permissions";
 
 export interface NavItem {
-  section: PainelSection;
+  area: PainelArea;
   label: string;
   href: string;
   icon: ReactNode;
 }
 
-export const NAV_ITEMS: NavItem[] = [
-  { section: "resumo", label: "Resumo", href: sectionHref("resumo"), icon: <GridIcon size={22} /> },
-  ...(["CONTRIBUTION", "EXPENSE", "REIMBURSEMENT", "REFUND"] as const).map((kind) => ({
-    section: kind,
-    label: KIND_META[kind].plural,
-    href: sectionHref(kind),
-    icon: KIND_META[kind].icon,
-  })),
-];
+/**
+ * Menu por perfil, a partir das permissoes da sessao (nunca de um papel fixo no cliente):
+ * professora = "Minhas despesas"; gestao = Resumo, Despesas e Fechamento; viewer = Resumo e Fechamento (leitura).
+ */
+export function navFor(areas: Areas, period?: string): NavItem[] {
+  const items: NavItem[] = [];
+  if (areas.resumo) items.push({ area: "resumo", label: "Resumo", href: areaHref("resumo", { period }), icon: <GridIcon size={22} /> });
+  if (areas.manageExpenses || areas.myExpenses) {
+    items.push({
+      area: "despesas",
+      label: areas.manageExpenses ? "Despesas" : "Minhas despesas",
+      href: areaHref("despesas"),
+      icon: <ReceiptIcon size={22} />,
+    });
+  }
+  if (areas.fechamento) items.push({ area: "fechamento", label: "Fechamento", href: areaHref("fechamento", { period }), icon: <ReportIcon size={22} /> });
+  return items;
+}
