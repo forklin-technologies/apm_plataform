@@ -5,6 +5,10 @@
 > revisarem. O frontend não decide nada disto: se o Backend preferir outro desenho, só
 > `apps/web/src/lib/api/` muda.
 >
+> **Atualização (TASK-011, fatia 2):** o portal público (`/escola/{slug}`) e o painel (resumo, extrato,
+> pendências, contribuição em dinheiro, PDF) agora são **reais**: valem `docs/public-flow.md` e
+> `docs/statement.md`, e esta página é só histórico. Nada do site é simulado.
+>
 > **Atualização (TASK-011, fatia 1):** a **autenticação já é REAL** e vale `docs/auth.md` e o
 > ADR-017 (prefixo `/api/v1`, erros em `application/problem+json` com `code`, cookies `apm_session`
 > HttpOnly e `apm_csrf` legível, `X-CSRF-Token` nos pedidos que mudam dados). Onde esta página

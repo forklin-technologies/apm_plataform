@@ -55,18 +55,28 @@ no comando: `npm run start -- -H 0.0.0.0 -p 3000`. O último `-H` vence.
   - Os textos de erro vêm do `code` do `problem+json` (`src/lib/auth-messages.ts`); o `title`/`detail` do
     servidor nunca aparece. `/login?next=` só aceita `/painel` e o link do convite (lista fechada).
   - `POST /auth/password` tem cliente e testes, mas **ainda não tem tela**.
-- **Simulado**: escolas, contribuição, Pix, comprovante, **indicadores e movimentações do painel**, em
-  `src/mocks/`, atrás das interfaces de `src/lib/api/types.ts`. Essas telas mostram o marcador
-  **"Protótipo · dados de exemplo"**. O Pix e o QR são de exemplo e não podem ser lidos por app de banco.
-- Os endpoints que o frontend ainda vai precisar estão em `docs/web-contract-proposals.md` como
-  **proposta**.
+- **Portal público (REAL)**, `/escola/{slug}` (`/apm/{slug}` redireciona), contrato em `docs/public-flow.md`
+  (`src/lib/api/public.ts`): escola, campos de identificação (`REQUIRED`/`OPTIONAL`/`HIDDEN`), criação da
+  contribuição com `Idempotency-Key` (uma `crypto.randomUUID()` por tentativa, só em memória e no cabeçalho),
+  QR Code desenhado no navegador a partir de `emv_payload` (`qrcode` 1.5.4, sem chamada externa), polling de 2 s
+  com recuo, `PAID`/`REVIEW_REQUIRED`/QR expirado (novo QR) e comprovante em `/escola/{slug}/pedido/{token}`.
+  O site só mostra "pago" quando a **contribuição** vem `PAID` da API. Com payload `PIX-SANDBOX:` (só em
+  desenvolvimento) aparece "Simular pagamento", que chama `POST /api/v1/dev/sandbox/pix/{txid}/pay`.
+- **Painel (REAL)**, `docs/statement.md` (`src/lib/api/statement.ts`): para a escola do vínculo ativo
+  (`active_membership.school.id`), resumo do mês com os dois saldos (em caixa, e após reembolsos pendentes),
+  lançamentos por tipo com "carregar mais" (cursor), pendências fora do saldo, mês na URL (`?mes=YYYY-MM`),
+  "Registrar contribuição em dinheiro" (`contributions:record_cash`) e link do PDF das contribuições do mês.
+  Rota que responder 403 (o `viewer` só lê o resumo) vira aviso. Vínculo da organização inteira não tem painel
+  de escola. Quem tem 2 ou mais vínculos escolhe o contexto como antes.
+- **Simulado**: nada. Não há mais camada de mocks nem selo de protótipo. Ainda **sem tela**: despesas
+  (professor e fila de análise), fechamento e PDF mensal, administração, troca de senha.
 
 Usuários de demonstração (dados falsos) e a senha do seed ficam fora do repositório. Testes de unidade
 usam mocks; o e2e com login real lê a senha só em tempo de execução (`E2E_DEMO_PASSWORD_FILE`, veja
 `e2e/auth-helpers.ts`) e roda contra o `npm run dev` (3101), porque a API só aceita as origens acima.
 
-Rotas: `/` · `/apm/[slug]` · `/apm/[slug]/pedido/[token]` · `/login` · `/accept-invitation?token=…` · `/painel` (exige sessão).
-Escolas de exemplo: `escola-exemplo`, `escola-horizonte`, `emei-vale-verde`.
+Rotas: `/` · `/escola/[slug]` · `/escola/[slug]/pedido/[token]` · `/login` · `/accept-invitation?token=…` · `/painel` (exige sessão).
+Escolas de demonstração (banco local): `demo-aurora`, `demo-horizonte`, `demo-central`.
 
 ## Estrutura
 
@@ -74,7 +84,6 @@ Escolas de exemplo: `escola-exemplo`, `escola-horizonte`, `emei-vale-verde`.
 src/app/          rotas (App Router)
 src/components/   ui/, portal/, painel/, status/, login/, invitation/
 src/lib/          money (centavos + BRL), validation, status, color (contraste AA), api/ (health, auth, csrf, server), auth-messages, safe-next, roles, hooks/
-src/mocks/        camada de dados simulada (só src/lib/api importa daqui)
 src/proxy.ts      CSP com nonce por requisição
 ```
 
@@ -93,17 +102,16 @@ src/proxy.ts      CSP com nonce por requisição
 
 ## Comprovante e privacidade (dado de criança)
 
-- **O comprovante só afirma o que a camada de dados confirma.** Só o link de exemplo
-  (`/apm/escola-exemplo/pedido/demo-comprovante-0001`) tem comprovante fixo. Para qualquer outro token o
-  HTML do servidor sai **neutro** ("Conferindo seu comprovante": sem "Pago", sem nome, sem valor) e quem
-  responde é a camada de dados, no navegador: comprovante, "ainda não confirmado" ou a mesma 404
-  estilizada (sem diferenciar "nunca existiu" de "ainda não existe").
-- Token do mock: 16 bytes de `crypto.getRandomValues` em base64url (22 caracteres, 128 bits, sem viés de
-  módulo). O frontend só confere o formato (22 a 64 caracteres seguros para URL); token curto é 404 de
-  verdade (HTTP).
-- No protótipo o mock guarda o pedido em `sessionStorage` só durante o fluxo: o nome do responsável, do
-  aluno e a turma são **apagados depois que o comprovante é mostrado**, e o pedido inteiro expira em 30
-  minutos mesmo que o comprovante nunca seja aberto. O link segue abrindo (sem os nomes) até o TTL.
+- **O comprovante só afirma o que a API confirma.** O servidor do Next consulta `GET .../receipt`: `200` entrega o
+  comprovante; `409` mostra "ainda não confirmado"; o `404` único da API (token inexistente, de outra escola ou
+  malformado) vira a 404 do site; qualquer outra falha (429, API fora do ar) deixa o HTML **neutro** ("Conferindo seu
+  comprovante": sem "Pago", sem nome, sem valor) e o navegador tenta de novo.
+- O token da contribuição (segredo da família) só vive na memória da página do fluxo e na URL do comprovante; a
+  `Idempotency-Key` é tão secreta quanto ele e só vai no cabeçalho do POST. Nada vai para `localStorage`,
+  `sessionStorage`, URL de outra página nem log. O navegador não guarda dado pessoal.
+- A API conta consultas que erram (token ou slug inexistente) contra o endereço e responde `429` com `Retry-After`;
+  o site mostra um aviso com o tempo de espera (no polling, espera e tenta de novo). Rodar muitos e2e seguidos
+  contra a mesma API pode bloquear o endereço por alguns minutos.
 - Nenhum `<form>` cai em GET com dados na URL (todos `method="post"` com `preventDefault`); campos de nome
   sem corretor ortográfico (`spellcheck=false`) e aluno/turma sem autopreenchimento.
 - Colar no campo de valor interpreta **reais** (`1.000` = R$ 1.000,00, `1,50` = R$ 1,50); o que não é
