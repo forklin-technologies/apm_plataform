@@ -118,28 +118,36 @@ def main(argv: Sequence[str] | None = None) -> int:
     factory = build_session_factory(engine)
 
     stop = threading.Event()
-    for signum in (signal.SIGTERM, signal.SIGINT):
-        signal.signal(signum, lambda *_: stop.set())
+    # Handlers only while looping, and put back afterwards: main() may run inside a bigger process
+    # (a test, a shell) whose Ctrl-C must keep working once it returns.
+    previous = {}
+    if args.loop:
+        for signum in (signal.SIGTERM, signal.SIGINT):
+            previous[signum] = signal.signal(signum, lambda *_: stop.set())
 
     exit_code = 0
-    while True:
-        try:
-            report = run_once(factory)
-            if report.charges or report.contributions or report.failed:
-                logger.info(
-                    "schools=%d charges_expired=%d contributions_expired=%d failed=%d",
-                    report.schools,
-                    report.charges,
-                    report.contributions,
-                    report.failed,
-                )
-            if report.failed:
+    try:
+        while True:
+            try:
+                report = run_once(factory)
+                if report.charges or report.contributions or report.failed:
+                    logger.info(
+                        "schools=%d charges_expired=%d contributions_expired=%d failed=%d",
+                        report.schools,
+                        report.charges,
+                        report.contributions,
+                        report.failed,
+                    )
+                if report.failed:
+                    exit_code = 1
+            except Exception as error:  # the database may be down: keep the loop alive
                 exit_code = 1
-        except Exception as error:  # the database may be down: keep the loop alive
-            exit_code = 1
-            logger.error("pass failed (%s)", type(error).__name__)
-        if not args.loop or stop.wait(args.interval):
-            break
+                logger.error("pass failed (%s)", type(error).__name__)
+            if not args.loop or stop.wait(args.interval):
+                break
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
     engine.dispose()
     return exit_code
 
