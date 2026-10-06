@@ -182,5 +182,5 @@ export function apiUpload<T>(
 
 /** GET de um arquivo (PDF, anexo) pela API, com o cookie de sessao. Nunca ha URL publica do arquivo. */
 export function apiBlob(path: string, options: RequestOptions = {}): Promise<ApiResult<BlobPayload>> {
-  return request(path, { method: "GET", csrf: false, blob: true }, (payload) => payload as BlobPayload, options, UPLOAD_TIMEOUT_MS);
+  return request(path, { method: "GET", csrf: false, blob: true }, (payload) => (payload instanceof Object && "blob" in payload && payload.blob instanceof Blob ? (payload as BlobPayload) : null), options, UPLOAD_TIMEOUT_MS);
 }
