@@ -10,7 +10,7 @@ test.skip(!demoPassword() || !apiAcceptsThisOrigin(), "precisa da senha de demon
 
 test("tesoureira: resumo com os dois saldos, pendencias fora do saldo e PDF do mes", async ({ page }) => {
   await loginAs(page, CARLA.email);
-  await expect(page.getByText(CARLA.school).first()).toBeVisible();
+  await expect(page.locator("main").getByText(CARLA.school).first()).toBeVisible();
   await expect(page.getByText(/Saldo em caixa em/)).toBeVisible();
   await expect(page.getByText(/Após reembolsos pendentes:/)).toBeVisible();
   await expect(page.getByRole("heading", { name: "Pendências (fora do saldo)" })).toBeVisible();
