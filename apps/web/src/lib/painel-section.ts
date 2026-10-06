@@ -22,6 +22,17 @@ export function parseSection(raw: string | string[] | undefined): PainelSection 
   return value !== undefined && Object.hasOwn(SLUG_TO_KIND, value) ? SLUG_TO_KIND[value]! : "resumo";
 }
 
-export function sectionHref(section: PainelSection): string {
-  return section === "resumo" ? "/painel" : `/painel?tipo=${KIND_TO_SLUG[section]}`;
+const PERIOD = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+/** `?mes=YYYY-MM` da URL; qualquer outra coisa vira "sem mes" (a API usa o mes corrente da escola). */
+export function parsePeriod(raw: string | string[] | undefined): string | undefined {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return value !== undefined && PERIOD.test(value) ? value : undefined;
+}
+
+export function sectionHref(section: PainelSection, period?: string): string {
+  const params: string[] = [];
+  if (section !== "resumo") params.push(`tipo=${KIND_TO_SLUG[section]}`);
+  if (period && PERIOD.test(period)) params.push(`mes=${period}`);
+  return params.length > 0 ? `/painel?${params.join("&")}` : "/painel";
 }

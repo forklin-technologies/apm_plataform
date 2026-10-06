@@ -4,24 +4,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { api } from "@/lib/api";
 import { parseSession } from "@/lib/api/auth";
 import type { ApiError, ApiResult, Session } from "@/lib/api/types";
-import { DASHBOARDS, ORGANIZATIONS } from "@/mocks/fixtures";
 import { SCHOOL_MEMBERSHIP, sessionBody } from "@/test-utils/auth-fixtures";
 
 const router = vi.hoisted(() => ({ replace: vi.fn(), refresh: vi.fn(), push: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => router }));
 vi.mock("@/components/status/ApiStatusChip", () => ({ ApiStatusChip: () => null }));
+vi.mock("./PainelData", () => ({
+  PainelData: (p: { schoolId: string; section: string; period?: string; permissions: string[] }) => (
+    <div data-testid="data">{`${p.schoolId}|${p.section}|${p.period ?? ""}|${p.permissions.join(",")}`}</div>
+  ),
+}));
 
 import { PainelShell } from "./PainelShell";
 
 const session = (overrides: Record<string, unknown> = {}) => parseSession(sessionBody(overrides)) as Session;
-const example = { school: ORGANIZATIONS[0]!.schools[0]!, data: DASHBOARDS["sch-exemplo"]! };
 const problem = (code: string, status: number): ApiResult<never> => ({
   ok: false,
   error: { kind: "problem", status, code } as ApiError,
 });
 
-function renderShell(s: Session = session()) {
-  return render(<PainelShell session={s} example={example} section="resumo" />);
+function renderShell(s: Session = session(), props: { section?: "resumo" | "EXPENSE"; period?: string } = {}) {
+  return render(<PainelShell session={s} section={props.section ?? "resumo"} period={props.period} />);
 }
 
 beforeEach(() => {
@@ -31,24 +34,38 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("PainelShell com sessao real", () => {
-  it("mostra o nome, o papel e o vinculo reais, e marca os numeros como exemplo", () => {
+  it("mostra o nome, o papel e o vinculo reais; vinculo da organizacao inteira nao tem painel de escola", () => {
     renderShell();
     expect(screen.getAllByText("Pessoa de Teste").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Administrador da organização").length).toBeGreaterThan(0);
     const switcher = screen.getAllByRole("button", { name: /Rede Teste/ })[0]!;
     expect(switcher).toHaveTextContent("Toda a organização");
-    expect(screen.getByRole("note")).toHaveTextContent("Protótipo: os números e as movimentações abaixo são de exemplo");
-    expect(screen.getAllByText(/Protótipo · dados de exemplo/).length).toBeGreaterThan(0);
+    expect(screen.queryByTestId("data")).not.toBeInTheDocument();
+    expect(screen.getByRole("note")).toHaveTextContent("Esta conta é da organização inteira");
+    expect(screen.queryByText(/Protótipo/)).not.toBeInTheDocument();
   });
 
-  it("vinculo de escola: o titulo e a escola real, nao a de exemplo", () => {
-    const s = session({
-      active_membership: { ...SCHOOL_MEMBERSHIP, permissions: [] },
-    });
-    renderShell(s);
+  it("vinculo de escola: o titulo e a escola real e os numeros vem da escola DO VINCULO ATIVO (id da sessao)", () => {
+    const s = session({ active_membership: { ...SCHOOL_MEMBERSHIP, permissions: ["statement:read", "reports:read"] } });
+    renderShell(s, { period: "2026-09" });
     expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Resumo");
     expect(screen.getAllByText(/Escola Teste/).length).toBeGreaterThan(0);
-    expect(screen.queryByText(example.school.name)).not.toBeInTheDocument();
+    expect(screen.getByTestId("data")).toHaveTextContent(`${SCHOOL_MEMBERSHIP.school.id}|resumo|2026-09|statement:read,reports:read`);
+  });
+
+  it("sem statement:read o menu so tem o Resumo (a rota de lancamentos nao e oferecida)", () => {
+    const viewer = session({ active_membership: { ...SCHOOL_MEMBERSHIP, role: "viewer", permissions: ["reports:read_aggregate"] } });
+    const { unmount } = renderShell(viewer);
+    expect(screen.getAllByRole("link", { name: "Resumo" }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("link", { name: "Contribuições" })).not.toBeInTheDocument();
+    unmount();
+    renderShell(session({ active_membership: { ...SCHOOL_MEMBERSHIP, permissions: ["statement:read"] } }));
+    expect(screen.getAllByRole("link", { name: "Contribuições" }).length).toBeGreaterThan(0);
+  });
+
+  it("os links do menu carregam o mes escolhido", () => {
+    renderShell(session({ active_membership: { ...SCHOOL_MEMBERSHIP, permissions: ["statement:read"] } }), { period: "2026-09" });
+    expect(screen.getAllByRole("link", { name: "Despesas" })[0]).toHaveAttribute("href", "/painel?tipo=despesas&mes=2026-09");
   });
 
   it("o seletor lista os vinculos reais agrupados e troca de contexto pelo id do vinculo", async () => {

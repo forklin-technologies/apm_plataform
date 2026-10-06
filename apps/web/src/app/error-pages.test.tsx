@@ -9,11 +9,11 @@ const secret = new Error("senha=1234 em /var/app/segredo.ts") as Error & { diges
 secret.digest = "a1b2c3";
 
 describe("N2: error.tsx", () => {
-  it("fala portugues, tem a identidade do produto e o marcador de prototipo", () => {
+  it("fala portugues e tem a identidade do produto, sem selo de prototipo (nada e simulado)", () => {
     render(<ErrorPage error={secret} reset={vi.fn()} />);
     expect(screen.getByRole("heading", { level: 1, name: "Algo deu errado por aqui" })).toBeInTheDocument();
     expect(screen.getByText("APM Digital")).toBeInTheDocument();
-    expect(screen.getByText("Protótipo · dados de exemplo")).toBeInTheDocument();
+    expect(screen.queryByText(/Protótipo/)).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Ir para o início" })).toHaveAttribute("href", "/");
   });
 
@@ -43,7 +43,7 @@ describe("N2: global-error.tsx", () => {
   it("mesmo texto em portugues e identidade, sem vazar a mensagem", () => {
     expect(html).toContain("Algo deu errado por aqui");
     expect(html).toContain("APM Digital");
-    expect(html).toContain("Protótipo · dados de exemplo");
+    expect(html).not.toContain("Protótipo");
     expect(html).not.toMatch(/senha|segredo|1234/);
     expect(html).toContain("Tentar de novo");
   });

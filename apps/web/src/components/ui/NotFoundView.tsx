@@ -1,6 +1,5 @@
 import { ButtonLink } from "@/components/ui/Button";
 import { Wordmark } from "@/components/ui/Logo";
-import { PrototypeBadge } from "@/components/ui/PrototypeBadge";
 
 /** 404 estilizada. O texto nunca confirma nem nega a existencia de escolas ou pedidos (ADR-010). */
 export function NotFoundView({ title, text }: { title: string; text: string }) {
@@ -10,7 +9,6 @@ export function NotFoundView({ title, text }: { title: string; text: string }) {
         <Wordmark />
       </header>
       <main id="conteudo" tabIndex={-1} className="outline-none mx-auto flex w-full max-w-6xl flex-1 flex-col justify-center px-5 pb-24 pt-10 sm:px-8">
-        <PrototypeBadge className="self-start" />
         <p aria-hidden="true" className="mt-8 text-[6.5rem] font-bold leading-none tracking-[-0.06em] text-ink-3/40 sm:text-[9rem]">
           404
         </p>

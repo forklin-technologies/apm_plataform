@@ -2,7 +2,6 @@ import Link from "next/link";
 import { ApiStatusChip } from "@/components/status/ApiStatusChip";
 import { ChevronRightIcon } from "@/components/ui/icons";
 import { Wordmark } from "@/components/ui/Logo";
-import { PrototypeBadge } from "@/components/ui/PrototypeBadge";
 
 const DEMOS = [
   {
@@ -35,7 +34,6 @@ export default function HomePage() {
       <main id="conteudo" tabIndex={-1} className="outline-none mx-auto w-full max-w-6xl px-5 pb-16 pt-8 sm:px-8 lg:pt-16">
         <div className="grid gap-12">
           <div>
-            <PrototypeBadge />
             <h1 className="mt-5 max-w-[17ch] text-balance text-hero tracking-[-0.03em] sm:max-w-[20ch] sm:text-[3.25rem] lg:text-[3.75rem]">
               Contribuir com a APM leva um minuto. Prestar contas, também.
             </h1>

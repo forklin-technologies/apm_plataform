@@ -1,20 +1,17 @@
 /**
- * Unico ponto de entrada para dados. Componentes importam `api` daqui e nunca de src/mocks.
+ * Unico ponto de entrada para dados. Componentes importam `api` daqui.
  *
  * - `health`, `auth` e `public` sao REAIS (mesma origem, /api/*): GET /api/health/ready, a autenticacao
  *   (docs/auth.md) e o portal publico de contribuicao (docs/public-flow.md).
- * - `dashboard` (indicadores e movimentacoes do painel) e SIMULADO por src/mocks atras da interface de
- *   types.ts ate o painel ser ligado ao extrato real. Quando for, so este arquivo muda.
+ * - `statement` (resumo, extrato, pendencias e contribuicao em dinheiro do painel) e REAL (docs/statement.md).
+ *   Nada do site e simulado: nao ha mais camada de mocks.
  */
-import { mockDataSource } from "@/mocks";
 import { acceptInvitation, changePassword, getMe, login, logout, switchContext } from "./auth";
 import { getReadiness } from "./health";
+import { getPending, getStatement, getSummary, recordCashContribution } from "./statement";
 import { createContribution, getContribution, getPublicSchool, getReceipt, renewCharge, sandboxPay } from "./public";
-import type { DataSource } from "./types";
 
-export const IS_PROTOTYPE_DATA = true;
-
-export const api: DataSource & {
+export const api: {
   health: { ready: typeof getReadiness };
   public: {
     school: typeof getPublicSchool;
@@ -23,6 +20,12 @@ export const api: DataSource & {
     renewCharge: typeof renewCharge;
     receipt: typeof getReceipt;
     sandboxPay: typeof sandboxPay;
+  };
+  statement: {
+    summary: typeof getSummary;
+    entries: typeof getStatement;
+    pending: typeof getPending;
+    recordCash: typeof recordCashContribution;
   };
   auth: {
     login: typeof login;
@@ -43,8 +46,12 @@ export const api: DataSource & {
     sandboxPay,
   },
   auth: { login, logout, me: getMe, switchContext, changePassword, acceptInvitation },
-  ...mockDataSource,
+  statement: {
+    summary: getSummary,
+    entries: getStatement,
+    pending: getPending,
+    recordCash: recordCashContribution,
+  },
 };
 
-export type { DataSource } from "./types";
 export * from "./types";

@@ -41,12 +41,13 @@ describe("/painel no servidor", () => {
     expect(html).not.toContain("Movimentações recentes");
   });
 
-  it("com sessao: mostra o nome real da pessoa e o vinculo, e os dados de exemplo marcados", async () => {
+  it("com sessao: mostra o nome real da pessoa e o vinculo; os numeros so chegam pela API, no navegador", async () => {
     const session = parseSession(sessionBody()) as Session;
     const html = await render({ state: "authenticated", session });
     expect(html).toContain("Pessoa de Teste");
     expect(html).toContain("Rede Teste");
-    expect(html).toContain("Protótipo: os números e as movimentações abaixo são de exemplo");
+    expect(html).not.toContain("Protótipo");
+    expect(html).not.toMatch(/R\$\s?\d/); // nenhum valor no HTML do servidor
     // nada do CSRF nem de sessao vai para o HTML
     expect(html).not.toContain("csrf-token-que-a-interface-ignora");
   });

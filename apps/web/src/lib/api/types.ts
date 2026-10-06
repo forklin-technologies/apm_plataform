@@ -9,7 +9,7 @@
  */
 import type { Cents } from "../money";
 import type { IdentificationConfig, IdentificationValues } from "../validation";
-import type { ContributionStatus, MovementKind, MovementStatus, PixChargeStatus } from "../status";
+import type { ContributionStatus, MovementKind, PixChargeStatus } from "../status";
 
 // ---------------------------------------------------------------- resultado e erros
 
@@ -61,6 +61,12 @@ export interface OrganizationRef {
   id: string;
   name: string;
   slug: string;
+}
+
+export interface SchoolRef {
+  id: string;
+  slug: string;
+  name: string;
 }
 
 /** Vinculo (membership): uma organizacao (e, se houver, uma escola) com um papel. */
@@ -157,67 +163,87 @@ export interface Receipt {
   method: string;
 }
 
-// ---------------------------------------------------------------- PROPOSTA: painel
+// ---------------------------------------------------------------- REAL: extrato do painel (docs/statement.md)
 
-export interface SchoolRef {
-  id: string;
-  slug: string;
-  name: string;
+/** Colunas de statement_summary: a API nao soma nada e o site tambem nao. Dinheiro em centavos. */
+export interface StatementSummary {
+  /** YYYY-MM no fuso da escola. */
+  period: string;
+  periodStart: string;
+  periodEnd: string;
+  timezone: string;
+  openingBalanceCents: Cents;
+  contributionsInCents: Cents;
+  otherInCents: Cents;
+  refundsInCents: Cents;
+  totalInCents: Cents;
+  /** Pagas pela APM, tarifas incluidas. */
+  expensesOutCents: Cents;
+  reimbursementsOutCents: Cents;
+  totalOutCents: Cents;
+  /** Saldo PRINCIPAL: em caixa. */
+  closingBalanceCents: Cents;
+  pendingReimbursementsCents: Cents;
+  /** Saldo SECUNDARIO: o de caixa menos os reembolsos ainda a pagar. */
+  balanceAfterPendingCents: Cents;
+  entriesCount: number;
 }
 
-export interface Organization {
-  id: string;
-  name: string;
-  schools: SchoolRef[];
-}
-
-export interface Movement {
-  id: string;
+export interface StatementEntry {
+  transactionId: string;
+  referenceCode: number;
   kind: MovementKind;
-  status: MovementStatus;
-  /** Quem manda se e entrada ou saida e o backend, nao a tela. */
+  displayType: "INCOME" | "EXPENSE" | "REFUND";
+  /** Quem manda se e entrada ou saida e a API, nao a tela. */
   direction: "IN" | "OUT";
-  title: string;
-  counterparty: string;
+  occurredAt: string;
+  localDate: string;
   amountCents: Cents;
+  signedAmountCents: Cents;
+  lateAdjustment: boolean;
+  /** Como a API manda (PAID...); a tela traduz. */
+  status: string;
+  /** Rotulo de status da API (PAID, REIMBURSED...), tambem em codigo: a tela traduz. */
+  statusLabel: string;
+  originLabel: string | null;
+  beneficiaryLabel: string | null;
+  categoryKey: string;
+  description: string | null;
+  runningBalanceCents: Cents;
+}
+
+/** Linha de statement_pending: fora do saldo (a pagar, em analise, a receber...). */
+export interface PendingEntry {
+  transactionId: string;
+  referenceCode: number;
+  kind: MovementKind;
+  direction: "IN" | "OUT";
+  status: string;
+  amountCents: Cents;
+  section: string;
   occurredAt: string;
 }
 
-export interface WeeklyTotal {
-  label: string;
-  inCents: Cents;
-  outCents: Cents;
+export interface Page<T> {
+  items: T[];
+  nextCursor: string | null;
 }
 
-/** Totais calculados pelo backend. A tela so exibe. */
-export interface DashboardSummary {
-  periodLabel: string;
-  /** Entradas menos despesas, reembolsos pagos e devolucoes. */
-  balanceCents: Cents;
-  collectedCents: Cents;
-  collectedCount: number;
-  expensesCents: Cents;
-  expensesCount: number;
-  reimbursementsPaidCents: Cents;
-  reimbursementsPendingCents: Cents;
-  reimbursementsPendingCount: number;
-  refundsCents: Cents;
-  refundsCount: number;
-  weekly: WeeklyTotal[];
+export type CashMethod = "CASH" | "TRANSFER" | "OTHER";
+export type CashCategory = "parent_contribution" | "donation" | "other_income" | "apm_revenue";
+
+export interface CashContributionInput {
+  amountCents: Cents;
+  method: CashMethod;
+  categoryKey: CashCategory;
+  identification: IdentificationValues;
 }
 
-export interface DashboardData {
-  summary: DashboardSummary;
-  movements: Movement[];
+export interface CashContributionResult {
+  id: string;
+  referenceCode: string;
+  status: string;
+  amountCents: Cents;
+  method: string;
 }
 
-// ---------------------------------------------------------------- interface de dados (mock hoje)
-
-export interface DashboardApi {
-  listOrganizations(): Promise<ApiResult<Organization[]>>;
-  getDashboard(schoolId: string): Promise<ApiResult<DashboardData>>;
-}
-
-export interface DataSource {
-  dashboard: DashboardApi;
-}

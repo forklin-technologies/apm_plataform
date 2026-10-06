@@ -71,3 +71,38 @@ export function describeRenewError(error: ApiError): string {
   }
   return "Não foi possível gerar um novo QR agora. Tente de novo em instantes.";
 }
+
+/** Erro do registro de contribuicao em dinheiro pela tesouraria (POST /schools/{id}/contributions). */
+export function describeCashError(error: ApiError): ContributionProblems {
+  const none: ContributionProblems = { general: null, amount: null, fields: {} };
+  if (error.kind === "network" || error.kind === "timeout") return { ...none, general: "Não foi possível falar com o servidor. Confira a conexão e tente de novo. Nada foi registrado." };
+  if (error.kind === "problem") {
+    switch (error.code) {
+      case "validation_error": {
+        const out: ContributionProblems = { general: null, amount: null, fields: {} };
+        for (const item of error.fields ?? []) {
+          if (item.field === "amount_cents") out.amount = "Confira o valor da contribuição.";
+          else if (item.field in FIELD_FROM_API) out.fields[FIELD_FROM_API[item.field]!] = "Confira este campo.";
+          else out.general = "Confira os dados informados e tente de novo.";
+        }
+        if (!out.amount && !out.general && Object.keys(out.fields).length === 0) out.general = "Confira os dados informados e tente de novo.";
+        return out;
+      }
+      case "permission_denied":
+        return { ...none, general: "Você não tem permissão para registrar contribuições." };
+      case "unauthenticated":
+      case "session_revoked":
+        return { ...none, general: "Sua sessão terminou. Entre de novo." };
+      case "rate_limited":
+        return { ...none, general: rateLimited(error) };
+      case "csrf_failed":
+      case "origin_not_allowed":
+        return { ...none, general: "Não foi possível confirmar que o pedido saiu desta página. Recarregue a página e tente de novo." };
+      case "idempotency_key_reused":
+        return { ...none, general: "Algo mudou entre uma tentativa e outra. Confira os dados e tente de novo." };
+      default:
+        break;
+    }
+  }
+  return { ...none, general: "Não foi possível registrar agora. Tente de novo em instantes. Nada foi registrado." };
+}

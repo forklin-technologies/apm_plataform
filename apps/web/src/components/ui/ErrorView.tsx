@@ -2,7 +2,6 @@
 
 import { Button, buttonClass } from "@/components/ui/Button";
 import { Wordmark } from "@/components/ui/Logo";
-import { PrototypeBadge } from "@/components/ui/PrototypeBadge";
 
 /**
  * Tela de erro inesperado (error.tsx e global-error.tsx). Texto em portugues, com a identidade do
@@ -16,7 +15,6 @@ export function ErrorView({ reset, digest }: { reset: () => void; digest?: strin
         <Wordmark />
       </header>
       <main id="conteudo" tabIndex={-1} className="mx-auto flex w-full max-w-6xl flex-1 flex-col justify-center px-5 pb-24 pt-10 outline-none sm:px-8">
-        <PrototypeBadge className="self-start" />
         <h1 className="mt-8 max-w-[20ch] text-balance text-title sm:text-[2.5rem]">Algo deu errado por aqui</h1>
         <p className="mt-3 max-w-[46ch] text-body text-ink-2">
           Não conseguimos mostrar esta página. Nada foi cobrado nem enviado. Tente de novo e, se continuar, volte ao início.
