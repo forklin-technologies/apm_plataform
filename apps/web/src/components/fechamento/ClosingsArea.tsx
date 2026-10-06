@@ -89,7 +89,7 @@ function ClosingCard({ schoolId, closing: c, permissions, open, onToggle, onChan
   }
 
   return (
-    <li>
+    <li data-status={reopened ? "reopened" : "closed"}>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3.5 sm:px-5">
         <div className="min-w-0 flex-1">
           <p className="text-body font-semibold capitalize text-ink">{periodLabel(c.period)}</p>
@@ -293,7 +293,9 @@ export function ClosingsArea({ schoolId, permissions }: Props) {
 
   return (
     <div>
-      {areas.closeMonths && (
+      {/* So depois da lista: o mes sugerido (o seguinte ao ultimo fechamento ativo) precisa ser conhecido, e o
+          formulario nao pode ser recriado, zerando a escolha da pessoa, quando a lista chegar. */}
+      {areas.closeMonths && res && (
         <CloseMonthForm
           key={next}
           schoolId={schoolId}

@@ -17,7 +17,16 @@ const routes = [
 ];
 
 // O painel exige sessao: estas rotas so rodam com a API real e a senha de demonstracao (e2e/auth-helpers.ts).
-const painelRoutes = ["/painel", "/painel?tipo=contribuicoes", "/painel?tipo=despesas", "/painel?tipo=reembolsos", "/painel?tipo=devolucoes"];
+const painelRoutes = [
+  "/painel",
+  "/painel?tipo=contribuicoes",
+  "/painel?tipo=despesas",
+  "/painel?tipo=reembolsos",
+  "/painel?tipo=devolucoes",
+  "/painel/despesas",
+  "/painel/fechamento",
+  "/painel/conta",
+];
 
 async function overflow(page: Page) {
   return page.evaluate(() => {
@@ -69,7 +78,7 @@ for (const width of [320, 360]) {
       }
     });
 
-    test("barra de abas do painel: nenhum rotulo truncado (nem 'Contribuições')", async ({ page }) => {
+    test("barra de abas do painel: nenhum rotulo truncado", async ({ page }) => {
       test.skip(!demoPassword(), "sem E2E_DEMO_PASSWORD_FILE/E2E_DEMO_PASSWORD");
       await loginAs(page);
       const labels = await page.evaluate(() =>
@@ -79,7 +88,8 @@ for (const width of [320, 360]) {
           fits: el.getBoundingClientRect().right <= document.documentElement.clientWidth,
         })),
       );
-      expect(labels.map((l) => l.text)).toEqual(["Resumo", "Contribuições", "Despesas", "Reembolsos", "Devoluções"]);
+      // tesoureira: Resumo, Despesas (fila) e Fechamento; os lancamentos por tipo ficam dentro do Resumo
+      expect(labels.map((l) => l.text)).toEqual(["Resumo", "Despesas", "Fechamento"]);
       for (const label of labels) {
         expect(label.truncated, `${label.text} truncado`).toBe(false);
         expect(label.fits, `${label.text} fora da tela`).toBe(true);

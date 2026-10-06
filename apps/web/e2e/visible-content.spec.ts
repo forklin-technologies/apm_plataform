@@ -118,6 +118,10 @@ for (const scenario of scenarios) {
         await page.goto(`/painel?tipo=${tipo}`);
         await expectVisible(page, `painel ${tipo}`, scenario);
       }
+      for (const path of ["/painel/despesas", "/painel/fechamento", "/painel/conta"]) {
+        await page.goto(path);
+        await expectVisible(page, `painel ${path}`, scenario);
+      }
       await page.goto("/painel");
       await page.getByRole("button", { name: new RegExp(ANA.organization) }).first().click();
       await expect(page.getByRole("group", { name: ANA.organization })).toBeVisible();
