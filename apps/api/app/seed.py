@@ -48,6 +48,10 @@ USERS = [
     # Three memberships (two schools of one network and a school of another), to try the switch of
     # context in the site.
     ("helena.multipla@example.test", "Helena Multipla (demo)"),
+    # One more teacher in Aurora and one more treasurer in Horizonte, so that every school has a
+    # person who submits an expense and a different person who approves it.
+    ("paula.professora@example.test", "Paula Professora (demo)"),
+    ("marcos.tesoureiro@example.test", "Marcos Tesoureiro (demo)"),
 ]
 # (email, organization slug, school slug or None for the whole organization, role)
 MEMBERSHIPS = [
@@ -61,6 +65,8 @@ MEMBERSHIPS = [
     ("helena.multipla@example.test", "demo-rede", "demo-aurora", "treasurer"),
     ("helena.multipla@example.test", "demo-rede", "demo-horizonte", "staff"),
     ("helena.multipla@example.test", "demo-instituto", "demo-central", "viewer"),
+    ("paula.professora@example.test", "demo-rede", "demo-aurora", "staff"),
+    ("marcos.tesoureiro@example.test", "demo-rede", "demo-horizonte", "treasurer"),
 ]
 
 
