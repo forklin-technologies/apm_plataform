@@ -10,6 +10,7 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "pydantic-settings>=2.6",
     "python-multipart>=0.0.20",
+    "reportlab>=4.2",
     "sqlalchemy>=2.0",
     "uvicorn>=0.32",
 ]
@@ -19,6 +20,7 @@ dev = [
     "httpx2>=2.0",
     "mypy>=1.13",
     "openapi-spec-validator>=0.7",
+    "pypdf>=5.0",
     "pytest>=8.3",
     "ruff>=0.8",
 ]
@@ -44,3 +46,8 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "S", "C4"]
 python_version = "3.12"
 strict = true
 files = ["app", "migrations", "tests"]
+
+[[tool.mypy.overrides]]
+# reportlab ships no type information.
+module = ["reportlab", "reportlab.*"]
+ignore_missing_imports = true
